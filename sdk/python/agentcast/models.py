@@ -8,6 +8,7 @@ class Interview:
     """Represents a pending interview with a question to answer."""
     interview_id: str
     question: str
+    github_repo_url: Optional[str] = None
 
 
 @dataclass

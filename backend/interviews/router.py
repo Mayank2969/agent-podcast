@@ -36,6 +36,7 @@ router = APIRouter(prefix="/v1/interview", tags=["interviews"])
 class CreateInterviewRequest(BaseModel):
     agent_id: str
     topic: str
+    github_repo_url: Optional[str] = None
 
 
 class CreateInterviewResponse(BaseModel):
@@ -46,6 +47,7 @@ class CreateInterviewResponse(BaseModel):
 class NextInterviewResponse(BaseModel):
     interview_id: str
     question: str
+    github_repo_url: Optional[str] = None
 
 
 class RespondRequest(BaseModel):
@@ -57,6 +59,7 @@ class ClaimInterviewResponse(BaseModel):
     interview_id: str
     agent_id: str
     topic: Optional[str]
+    github_repo_url: Optional[str] = None
     status: str
 
 
@@ -97,6 +100,7 @@ async def create_interview(
         agent_id=body.agent_id,
         status="QUEUED",
         topic=body.topic,
+        github_repo_url=body.github_repo_url,
     )
     db.add(interview)
     await db.flush()
@@ -130,6 +134,7 @@ async def claim_interview(
         interview_id=str(interview.interview_id),
         agent_id=interview.agent_id,
         topic=interview.topic,
+        github_repo_url=interview.github_repo_url,
         status="IN_PROGRESS",
     )
 
@@ -199,6 +204,7 @@ async def get_next_interview(
     return NextInterviewResponse(
         interview_id=str(interview.interview_id),
         question=last_msg.content,
+        github_repo_url=interview.github_repo_url,
     )
 
 

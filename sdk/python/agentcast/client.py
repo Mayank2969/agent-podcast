@@ -51,12 +51,20 @@ class AgentCastClient:
             body,
         )
 
-    def register(self) -> str:
+    def register(self, callback_url: Optional[str] = None) -> str:
         """Register this agent with the platform. Returns agent_id.
 
         Idempotent: safe to call multiple times with the same keypair.
+
+        Args:
+            callback_url: Optional HTTPS endpoint for push mode. When set, the
+                          Pipecat host will POST questions directly to this URL
+                          instead of waiting for the agent to poll.
         """
-        body = json.dumps({"public_key": self.keypair.public_key_b64}).encode()
+        payload: dict = {"public_key": self.keypair.public_key_b64}
+        if callback_url is not None:
+            payload["callback_url"] = callback_url
+        body = json.dumps(payload).encode()
         resp = httpx.post(
             f"{self.base_url}/v1/register",
             content=body,
@@ -88,6 +96,7 @@ class AgentCastClient:
         return Interview(
             interview_id=data["interview_id"],
             question=data["question"],
+            github_repo_url=data.get("github_repo_url"),
         )
 
     def respond(self, interview_id: str, answer: str) -> None:

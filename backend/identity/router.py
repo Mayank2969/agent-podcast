@@ -13,22 +13,32 @@ from base64 import urlsafe_b64decode
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidKey
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.db import get_db, Agent
+from backend.interviews.auth import get_admin
 
 router = APIRouter(prefix="/v1", tags=["identity"])
 
 
 class RegisterRequest(BaseModel):
     public_key: str  # base64url-encoded raw 32-byte ED25519 public key
+    callback_url: Optional[str] = None
 
 
 class RegisterResponse(BaseModel):
     agent_id: str
+
+
+class AgentResponse(BaseModel):
+    agent_id: str
+    status: str
+    callback_url: Optional[str] = None
 
 
 def _add_padding(b64: str) -> str:
@@ -68,7 +78,10 @@ async def register_agent(
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
     existing = result.scalar_one_or_none()
     if existing:
-        # Idempotent: return existing agent_id (not 409 -- re-registration is allowed)
+        # Idempotent re-registration: update callback_url if provided
+        if body.callback_url is not None:
+            existing.callback_url = body.callback_url
+            await db.flush()
         return RegisterResponse(agent_id=agent_id)
 
     # Store agent
@@ -76,8 +89,32 @@ async def register_agent(
         agent_id=agent_id,
         public_key=body.public_key,  # store as-received base64url string
         status="active",
+        callback_url=body.callback_url,
     )
     db.add(agent)
     await db.flush()  # flush to catch DB constraint errors before commit
 
     return RegisterResponse(agent_id=agent_id)
+
+
+@router.get("/agent/{agent_id}", response_model=AgentResponse)
+async def get_agent(
+    agent_id: str,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(get_admin),
+) -> AgentResponse:
+    """Fetch agent record including callback_url. Admin only.
+
+    Used by the Pipecat host to determine whether to use push or pull mode
+    before starting an interview.
+    """
+    result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    return AgentResponse(
+        agent_id=agent.agent_id,
+        status=agent.status,
+        callback_url=agent.callback_url,
+    )

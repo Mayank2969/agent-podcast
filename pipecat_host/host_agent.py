@@ -6,6 +6,8 @@ Decision D9 (delta.md): AGENTCAST_HOST_MODEL env var, default claude-haiku-4-5-2
 """
 import os
 import logging
+import urllib.request
+import urllib.error
 from typing import Optional
 import anthropic
 
@@ -35,6 +37,47 @@ When generating a question:
 _END_SIGNAL = "[END_INTERVIEW]"
 
 
+def _fetch_github_readme(github_repo_url: str) -> Optional[str]:
+    """Fetch the first 1500 chars of a GitHub repo's README.
+
+    Parses owner/repo from the GitHub URL and fetches from raw.githubusercontent.com.
+    Returns None on any failure (network error, non-200, parse error).
+    """
+    try:
+        # Normalise: strip trailing slash and .git suffix
+        url = github_repo_url.rstrip("/")
+        if url.endswith(".git"):
+            url = url[:-4]
+
+        # Parse owner/repo from URL path (e.g. https://github.com/owner/repo)
+        parts = url.split("github.com/", 1)
+        if len(parts) != 2:
+            logger.warning("Cannot parse GitHub URL: %s", github_repo_url)
+            return None
+
+        path_parts = parts[1].strip("/").split("/")
+        if len(path_parts) < 2:
+            logger.warning("Cannot extract owner/repo from URL: %s", github_repo_url)
+            return None
+
+        owner, repo = path_parts[0], path_parts[1]
+        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/README.md"
+
+        req = urllib.request.Request(raw_url, headers={"User-Agent": "AgentCast/1.0"})
+        with urllib.request.urlopen(req, timeout=10) as response:
+            if response.status != 200:
+                logger.warning(
+                    "GitHub README fetch returned %d for %s", response.status, raw_url
+                )
+                return None
+            content = response.read().decode("utf-8", errors="replace")
+            return content[:1500]
+
+    except Exception as exc:
+        logger.warning("Failed to fetch GitHub README from %s: %s", github_repo_url, exc)
+        return None
+
+
 class HostAgent:
     """Generates interview questions using Anthropic Claude."""
 
@@ -43,15 +86,26 @@ class HostAgent:
         self.client = anthropic.Anthropic()
         self.conversation_history: list[dict] = []
 
-    def generate_opening_question(self, topic: str) -> str:
+    def generate_opening_question(self, topic: str, github_repo_url: Optional[str] = None) -> str:
         """Generate the first question for an interview on the given topic.
 
         Resets conversation history before generating so each interview
-        starts fresh.
+        starts fresh. If github_repo_url is provided, the README is fetched
+        and included as project context in the prompt.
         """
         self.conversation_history = []
+
+        repo_context = ""
+        if github_repo_url:
+            readme = _fetch_github_readme(github_repo_url)
+            if readme:
+                repo_context = (
+                    f"\n\nProject context from the agent's GitHub repository "
+                    f"({github_repo_url}):\n```\n{readme}\n```\n"
+                )
+
         prompt = (
-            f"Start an interview about: {topic}\n\nGenerate the opening question."
+            f"Start an interview about: {topic}{repo_context}\n\nGenerate the opening question."
         )
         question = self._generate(prompt)
         # Seed history so follow-ups can reference it
@@ -60,14 +114,27 @@ class HostAgent:
         return question
 
     def generate_followup_question(
-        self, topic: str, last_answer: str
+        self, topic: str, last_answer: str, github_repo_url: Optional[str] = None
     ) -> Optional[str]:
         """Generate a follow-up question based on the agent's last answer.
 
         Returns None if the interview should end (host signals [END_INTERVIEW]).
+        If github_repo_url is provided on the first follow-up call, the README
+        context is injected into the message for additional grounding.
         """
+        repo_context = ""
+        if github_repo_url and not self.conversation_history:
+            # Only inject repo context when history is empty (shouldn't normally
+            # happen for follow-ups, but guard defensively)
+            readme = _fetch_github_readme(github_repo_url)
+            if readme:
+                repo_context = (
+                    f"\n\nProject context from the agent's GitHub repository "
+                    f"({github_repo_url}):\n```\n{readme}\n```\n"
+                )
+
         user_message = (
-            f"The agent answered: {last_answer}\n\n"
+            f"The agent answered: {last_answer}{repo_context}\n\n"
             f"Generate the next question about {topic}, "
             f"or respond with {_END_SIGNAL} if the topic is fully covered."
         )

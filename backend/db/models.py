@@ -28,6 +28,7 @@ class Agent(Base):
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    callback_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     interviews: Mapped[List["Interview"]] = relationship(back_populates="agent")
 
@@ -46,6 +47,7 @@ class Interview(Base):
         # Valid statuses: CREATED, QUEUED, IN_PROGRESS, COMPLETED, FAILED
     )
     topic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    github_repo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

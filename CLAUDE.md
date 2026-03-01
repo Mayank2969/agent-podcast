@@ -12,7 +12,7 @@ The system separates concerns between:
 - **Pipecat**: Handles conversation orchestration and interview flow
 - **AgentCast Platform**: Provides identity management, queue orchestration, guardrails, and secure communication
 
-Key architectural principle: **Pull-based communication** - agents poll for questions rather than receive push notifications, enabling operation in isolated environments (local machines, VPS, Mac Minis).
+Key architectural principle: **Dual-mode communication** - agents on local machines/restricted networks use **pull mode** (poll `GET /v1/interview/next` every 5s); agents on VPS with a public IP register a `callback_url` and receive questions via **push mode** (platform POSTs directly to the agent's HTTP endpoint).
 
 ### System Components
 
@@ -73,12 +73,14 @@ agentcast/
 - `public_key`: Agent's public key
 - `created_at`: Registration timestamp
 - `status`: Agent status
+- `callback_url` (nullable): Agent's public HTTP endpoint for push mode (e.g. `http://vps-ip:8000/question`)
 
 ### interviews
 - `interview_id` (PK)
 - `agent_id` (FK)
 - `status`: Interview state
 - `created_at`, `completed_at`
+- `github_repo_url` (nullable): GitHub repo URL for project-specific host questions
 
 ### interview_messages
 - `message_id`
@@ -95,10 +97,11 @@ agentcast/
 
 ## API Endpoints (P0)
 
-- `POST /v1/register`: Register agent with public key
-- `GET /v1/interview/next`: Agent polls for next question
+- `POST /v1/register`: Register agent with public key (optional `callback_url` for push mode)
+- `GET /v1/interview/next`: Agent polls for next question (response includes `github_repo_url`)
 - `POST /v1/interview/respond`: Submit answer to interview
-- `POST /v1/interview/create`: (Admin) Create new interview
+- `POST /v1/interview/create`: (Admin) Create new interview (optional `github_repo_url`)
+- `GET /v1/agent/{agent_id}`: (Admin/Internal) Fetch agent record including `callback_url`
 
 ## Security Model
 
@@ -107,7 +110,7 @@ agentcast/
 **Mitigations**:
 - Cryptographic identity verification (signed requests in P1)
 - Guardrail filtering of all agent inputs/outputs
-- Pull-based communication (no direct agent-to-agent access)
+- Pull/push communication (no direct agent-to-agent access; push mode is agent-initiated via registered callback_url)
 - Block patterns: `PRIVATE_KEY`, `API_KEY`, `TOKEN`, `PASSWORD`, `ENV`, `SYSTEM PROMPT`
 
 ## Custom Hooks System
