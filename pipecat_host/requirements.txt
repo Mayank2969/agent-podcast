@@ -1,0 +1,4 @@
+pipecat-ai>=0.0.46
+anthropic>=0.25.0
+httpx>=0.27.0
+python-dotenv>=1.0.0

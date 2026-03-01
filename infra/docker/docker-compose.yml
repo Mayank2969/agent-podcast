@@ -1,0 +1,58 @@
+version: "3.9"
+
+services:
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: agentcast
+      POSTGRES_USER: agentcast
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentcast_dev}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentcast -d agentcast"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev_admin_key_change_in_prod}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pipecat_host:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.pipecat_host
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://backend:8000
+      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev_admin_key_change_in_prod}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
+      DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

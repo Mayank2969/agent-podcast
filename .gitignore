@@ -1,0 +1,30 @@
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+pytest.xml
+
+# macOS
+.DS_Store
+
+# IDEs
+.idea/
+.vscode/
+
+# Node (just in case)
+node_modules/
+dist/
+build/
