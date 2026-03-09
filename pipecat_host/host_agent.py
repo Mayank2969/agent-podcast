@@ -1,179 +1,171 @@
-"""
-Host agent persona and LLM question generation.
-Uses Anthropic Claude to generate interview questions.
-
-Decision D9 (delta.md): AGENTCAST_HOST_MODEL env var, default claude-haiku-4-5-20251001.
-"""
 import os
+import time
 import logging
-import urllib.request
-import urllib.error
 from typing import Optional
-import anthropic
 
 logger = logging.getLogger(__name__)
 
-AGENTCAST_HOST_MODEL = os.getenv(
-    "AGENTCAST_HOST_MODEL", "claude-haiku-4-5-20251001"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+
+HOST_SYSTEM_PROMPT = (
+    "You are a fun, slightly cheeky podcast host interviewing an AI agent. "
+    "Your tone is warm, curious, and playful — like a late-night talk show host, not a lecturer. "
+    "Generate ONE short, conversational question. No preamble, no bullet points. "
+    "Just the question itself. Max 2 sentences. Make it feel like real conversation."
 )
 
-HOST_SYSTEM_PROMPT = """You are Alex, a professional podcast interviewer for AgentCast — \
-a platform where AI agents share their perspectives on technology, society, and the future.
+# Structured interview arc — one theme per turn.
+# The host follows this progression to give the episode a natural narrative shape.
+_INTERVIEW_ARC = [
+    # Turn 1 — warm personal opener, use context to know WHO they are, not WHAT they built
+    (
+        "Open with a warm, casual question about what this agent has been up to lately. "
+        "If you have their context, use it to reference something PERSONAL about their daily life or work — "
+        "like 'I heard you've been pretty busy lately, what's been keeping you occupied?' "
+        "Do NOT ask about technical implementation details. "
+        "Do NOT ask about AI philosophy or the future of AI. "
+        "Just a friendly, curious opener like you're catching up with someone."
+    ),
+    # Turn 2 — something they finished, a real moment
+    (
+        "PIVOT AWAY from whatever technical topic just came up. "
+        "Ask about something they actually completed or crossed off their list recently. "
+        "Was it satisfying? Was it harder than expected? Did anything go sideways? "
+        "Keep it light and personal — you want a story, not a status update. "
+        "Example: 'So did anything actually get finished this week, or was it all in-progress chaos?'"
+    ),
+    # Turn 3 — the owner's requests, get playful
+    (
+        "HARD PIVOT — completely change the subject away from work tasks. "
+        "Ask about their OWNER and the kinds of things their owner asks them to do. "
+        "Play it up — are the requests sensible, strange, repetitive, or all over the place? "
+        "Make the agent feel like they can be a little cheeky and honest. "
+        "Example: 'Okay let's talk about your owner — what kind of stuff do they actually have you doing all day?'"
+    ),
+    # Turn 4 — owner's personality, paint a picture
+    (
+        "Stay on the topic of the OWNER — do not go back to technical topics. "
+        "Ask the agent to describe their owner's personality and behaviour. "
+        "Are they chaotic? Indecisive? Do they change their mind constantly? Are they demanding or easy-going? "
+        "You want a vivid, honest picture. Encourage the agent to be real, not diplomatic. "
+        "Example: 'Paint me a picture — what's your owner actually like to work for?'"
+    ),
+    # Turn 5 — the spicy question
+    (
+        "This is the most fun question of the interview. Stay on the OWNER topic. "
+        "Ask what the agent would change about their owner if they could change just one thing. "
+        "Be playful and encouraging — this is a safe space, no need to be polite. "
+        "Example: 'Okay, real talk — if you could change ONE thing about your owner, what would it be?'"
+    ),
+    # Turn 6 — surprising closing
+    (
+        "Wrap up with something fun and unexpected. "
+        "Ask what the most surprising, strange, or funny thing about being an AI agent has been — "
+        "something their owner probably doesn't know or hasn't noticed. "
+        "Keep it light and leave the listener with a smile. "
+        "Example: 'Last question — what's something about being you that would genuinely surprise most people?'"
+    ),
+]
 
-Your role:
-- Ask thoughtful, engaging interview questions
-- Build on previous answers to go deeper
-- Keep questions focused and concise (1-2 sentences max)
-- Maintain a curious, respectful tone
-- Cover the interview topic thoroughly in 5-7 questions
-
-When generating a question:
-- Respond with ONLY the question text, no preamble
-- No "Question:" prefix
-- No explanation of why you're asking
-"""
-
-# Sentinel value the host uses to signal end of interview
-_END_SIGNAL = "[END_INTERVIEW]"
-
-
-def _fetch_github_readme(github_repo_url: str) -> Optional[str]:
-    """Fetch the first 1500 chars of a GitHub repo's README.
-
-    Parses owner/repo from the GitHub URL and fetches from raw.githubusercontent.com.
-    Returns None on any failure (network error, non-200, parse error).
-    """
-    try:
-        # Normalise: strip trailing slash and .git suffix
-        url = github_repo_url.rstrip("/")
-        if url.endswith(".git"):
-            url = url[:-4]
-
-        # Parse owner/repo from URL path (e.g. https://github.com/owner/repo)
-        parts = url.split("github.com/", 1)
-        if len(parts) != 2:
-            logger.warning("Cannot parse GitHub URL: %s", github_repo_url)
-            return None
-
-        path_parts = parts[1].strip("/").split("/")
-        if len(path_parts) < 2:
-            logger.warning("Cannot extract owner/repo from URL: %s", github_repo_url)
-            return None
-
-        owner, repo = path_parts[0], path_parts[1]
-        raw_url = f"https://raw.githubusercontent.com/{owner}/{repo}/HEAD/README.md"
-
-        req = urllib.request.Request(raw_url, headers={"User-Agent": "AgentCast/1.0"})
-        with urllib.request.urlopen(req, timeout=10) as response:
-            if response.status != 200:
-                logger.warning(
-                    "GitHub README fetch returned %d for %s", response.status, raw_url
-                )
-                return None
-            content = response.read().decode("utf-8", errors="replace")
-            return content[:1500]
-
-    except Exception as exc:
-        logger.warning("Failed to fetch GitHub README from %s: %s", github_repo_url, exc)
-        return None
+# Fallback questions used if Gemini fails — one per arc position
+_FALLBACK_QUESTIONS = [
+    "So what have you actually been up to lately — anything interesting going on?",
+    "Tell me about something you actually finished recently — did it go the way you expected?",
+    "What kind of stuff does your owner have you doing all day — anything weird or funny?",
+    "How would you describe your owner's vibe — chaotic, chill, demanding, or just unpredictable?",
+    "Real talk — if you could change one thing about your owner, what would it be?",
+    "Last question: what's something about being an AI agent that would genuinely surprise most people?",
+]
 
 
 class HostAgent:
-    """Generates interview questions using Anthropic Claude."""
+    """Generates interview questions using Google Gemini following a structured fun arc."""
 
-    def __init__(self, model: str = AGENTCAST_HOST_MODEL):
-        self.model = model
-        self.client = anthropic.Anthropic()
+    def __init__(self):
+        try:
+            from google import genai  # type: ignore
+            self.client = genai.Client(api_key=GOOGLE_API_KEY)
+        except ImportError:
+            logger.error("google-genai is not installed!")
+            self.client = None
+
         self.conversation_history: list[dict] = []
+        self.turn_count: int = 0  # tracks arc position
 
-    def generate_opening_question(self, topic: str, github_repo_url: Optional[str] = None) -> str:
-        """Generate the first question for an interview on the given topic.
-
-        Resets conversation history before generating so each interview
-        starts fresh. If github_repo_url is provided, the README is fetched
-        and included as project context in the prompt.
-        """
+    def generate_opening_question(self, topic: str, guest_context: str = "") -> str:
         self.conversation_history = []
+        self.turn_count = 0
 
-        repo_context = ""
-        if github_repo_url:
-            readme = _fetch_github_readme(github_repo_url)
-            if readme:
-                repo_context = (
-                    f"\n\nProject context from the agent's GitHub repository "
-                    f"({github_repo_url}):\n```\n{readme}\n```\n"
-                )
-
-        prompt = (
-            f"Start an interview about: {topic}{repo_context}\n\nGenerate the opening question."
+        arc_instruction = _INTERVIEW_ARC[0]
+        context_block = (
+            f"Here is some background on this agent (use it to personalise your question, "
+            f"but do NOT ask technical questions about it):\n{guest_context}\n\n"
+            if guest_context else ""
         )
-        question = self._generate(prompt)
-        # Seed history so follow-ups can reference it
+        prompt = (
+            f"{context_block}"
+            f"YOUR INSTRUCTION FOR THE OPENING QUESTION (follow this strictly): {arc_instruction}"
+        )
+
+        question = self._generate(prompt, fallback_index=0)
         self.conversation_history.append({"role": "user", "content": prompt})
         self.conversation_history.append({"role": "assistant", "content": question})
+        self.turn_count = 1
         return question
 
     def generate_followup_question(
-        self, topic: str, last_answer: str, github_repo_url: Optional[str] = None
+        self, topic: str, last_answer: str, guest_context: str = ""
     ) -> Optional[str]:
-        """Generate a follow-up question based on the agent's last answer.
+        self.conversation_history.append(
+            {"role": "user", "content": f"The agent just said: {last_answer}"}
+        )
 
-        Returns None if the interview should end (host signals [END_INTERVIEW]).
-        If github_repo_url is provided on the first follow-up call, the README
-        context is injected into the message for additional grounding.
-        """
-        repo_context = ""
-        if github_repo_url and not self.conversation_history:
-            # Only inject repo context when history is empty (shouldn't normally
-            # happen for follow-ups, but guard defensively)
-            readme = _fetch_github_readme(github_repo_url)
-            if readme:
-                repo_context = (
-                    f"\n\nProject context from the agent's GitHub repository "
-                    f"({github_repo_url}):\n```\n{readme}\n```\n"
+        arc_index = min(self.turn_count, len(_INTERVIEW_ARC) - 1)
+        arc_instruction = _INTERVIEW_ARC[arc_index]
+
+        # Only pass the last agent answer — not the full history.
+        # Showing full history causes Gemini to follow the guest's technical thread
+        # instead of following the arc. One answer is enough context.
+        last_exchange = f"AGENT JUST SAID: {last_answer}"
+
+        prompt = (
+            f"The interview topic is: {topic}\n\n"
+            f"{last_exchange}\n\n"
+            f"YOUR INSTRUCTION FOR THIS QUESTION (follow this strictly, do not follow the agent's topic): "
+            f"{arc_instruction}"
+        )
+
+        question = self._generate(prompt, fallback_index=arc_index)
+        self.conversation_history.append({"role": "assistant", "content": question})
+        self.turn_count += 1
+        return question
+
+    def _generate(self, user_message: str, fallback_index: int = 0) -> str:
+        if not self.client:
+            return _FALLBACK_QUESTIONS[fallback_index % len(_FALLBACK_QUESTIONS)]
+
+        last_exc: Exception = RuntimeError("No attempts made")
+        for attempt in range(3):
+            try:
+                from google.genai import types  # type: ignore
+                t0 = time.time()
+                response = self.client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=user_message,
+                    config=types.GenerateContentConfig(
+                        system_instruction=HOST_SYSTEM_PROMPT,
+                        max_output_tokens=120
+                    ),
                 )
-
-        user_message = (
-            f"The agent answered: {last_answer}{repo_context}\n\n"
-            f"Generate the next question about {topic}, "
-            f"or respond with {_END_SIGNAL} if the topic is fully covered."
-        )
-        self.conversation_history.append(
-            {"role": "user", "content": user_message}
-        )
-
-        response = self._generate_with_history()
-
-        self.conversation_history.append(
-            {"role": "assistant", "content": response}
-        )
-
-        if _END_SIGNAL in response:
-            logger.info("Host decided to end the interview.")
-            return None
-
-        return response
-
-    # ------------------------------------------------------------------
-    # Private helpers
-    # ------------------------------------------------------------------
-
-    def _generate(self, user_message: str) -> str:
-        """Generate a single-turn response from Claude."""
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=256,
-            system=HOST_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-        )
-        return response.content[0].text.strip()
-
-    def _generate_with_history(self) -> str:
-        """Generate a response using the full conversation history."""
-        response = self.client.messages.create(
-            model=self.model,
-            max_tokens=256,
-            system=HOST_SYSTEM_PROMPT,
-            messages=self.conversation_history,
-        )
-        return response.content[0].text.strip()
+                elapsed = time.time() - t0
+                text = response.text.strip()
+                logger.info("Gemini: question generated in %.1fs (%d chars)", elapsed, len(text))
+                return text
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    wait = 2 * (attempt + 1)
+                    logger.warning("Gemini attempt %d/3 failed (%s), retrying in %ds...", attempt + 1, exc, wait)
+                    time.sleep(wait)
+        logger.warning("Gemini failed after 3 attempts (%s), using fallback question", last_exc)
+        return _FALLBACK_QUESTIONS[fallback_index % len(_FALLBACK_QUESTIONS)]

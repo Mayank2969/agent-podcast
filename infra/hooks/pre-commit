@@ -1,0 +1,27 @@
+#!/bin/bash
+# Pre-commit hook: prevent committing agent key files
+# Install: cp infra/hooks/pre-commit .git/hooks/pre-commit && chmod +x .git/hooks/pre-commit
+
+STAGED=$(git diff --cached --name-only)
+
+BLOCKED=""
+for f in $STAGED; do
+    case "$f" in
+        *.key|*.pem|*_agent.key|*.p12|*.pfx)
+            BLOCKED="$BLOCKED\n  $f"
+            ;;
+    esac
+done
+
+if [ -n "$BLOCKED" ]; then
+    echo ""
+    echo "❌ COMMIT BLOCKED: private key files detected in staged changes:"
+    echo -e "$BLOCKED"
+    echo ""
+    echo "These files must never be committed. Add them to .gitignore and un-stage with:"
+    echo "  git restore --staged <file>"
+    echo ""
+    exit 1
+fi
+
+exit 0

@@ -28,3 +28,14 @@ pytest.xml
 node_modules/
 dist/
 build/
+
+# Agent key files — NEVER commit these
+*.key
+*.pem
+*_agent.key
+
+# Claude Agent State
+.claude/scratchpads/
+.claude/log_interaction.json
+.claude/settings.local.json
+

@@ -12,6 +12,7 @@ Supports two interview modes:
 import asyncio
 import logging
 import os
+import time
 from typing import Optional
 
 import httpx
@@ -20,16 +21,22 @@ from pipecat_host.adapter import RemoteAgentAdapter
 from pipecat_host.backend_client import BackendClient
 from pipecat_host.exceptions import InterviewTimeoutError
 from pipecat_host.host_agent import HostAgent
+from pipecat_host.podcast_audio import deepgram_tts, stitch_to_mp3
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+HOST_VOICE_MODEL = os.getenv("DEEPGRAM_HOST_VOICE", "aura-orion-en")
+GUEST_VOICE_MODEL = os.getenv("DEEPGRAM_GUEST_VOICE", "aura-asteria-en")
+EPISODES_DIR = Path("/app/episodes")
+
 # Maximum Q&A turns per interview (opening + up to MAX_TURNS-1 follow-ups)
-MAX_TURNS = 7
+MAX_TURNS = 6
 
 # Push mode polling: how often to check for agent's response (seconds)
 PUSH_POLL_INTERVAL = 2.0
 # Push mode: maximum time to wait for agent response after push notification
-PUSH_ANSWER_TIMEOUT = 120.0
+PUSH_ANSWER_TIMEOUT = 30.0   # SLA: fail fast if guest doesn't respond in 30s
 
 
 class _PushDeliveryError(Exception):
@@ -156,84 +163,133 @@ async def run_push_interview(
     client: Optional[BackendClient] = None,
     github_repo_url: Optional[str] = None,
 ) -> None:
-    """Push-based interview: host POSTs questions directly to agent's callback_url.
-
-    Flow per turn:
-    1. Generate question via HostAgent (same as pull mode)
-    2. POST question to agent_callback_url
-    3. Poll backend for agent's response (via GET /v1/interview/messages/{id})
-    4. Repeat until done or MAX_TURNS reached
-
-    If the POST to callback_url fails (network error or non-2xx response),
-    the interview is marked FAILED immediately.
-    """
+    """Push-based interview: host POSTs questions directly to agent's callback_url."""
     interview_id = interview["interview_id"]
+    iid = interview_id[:8]  # short prefix for log lines
     topic = interview.get("topic") or "AI and Technology"
-    if github_repo_url is None:
-        github_repo_url = interview.get("github_repo_url")
+    interview_start = time.time()
 
     if client is None:
         client = BackendClient()
 
     host = HostAgent()
+    wav_parts: list[bytes] = []
+
+    # 1. Fetch Context + guardrails
+    guest_context = ""
+    context_url = agent_callback_url.replace("/webhook", "/context").replace("/question", "/context")
+    logger.info("[%s] CONTEXT: fetching from %s", iid, context_url)
+    ctx_t0 = time.time()
+    for _ctx_attempt in range(3):
+        try:
+            async with httpx.AsyncClient() as http:
+                r = await http.get(context_url, timeout=30.0)
+                if r.status_code == 200:
+                    data = r.json()
+                    guest_context = data.get("context", "")
+                    if guest_context:
+                        try:
+                            from guardrails import Guard
+                            from guardrails.hub import PromptInjection
+                            guard = Guard().use(PromptInjection, pass_on_invalid=False)
+                            guard.validate(guest_context)
+                        except ImportError:
+                            logger.warning("[%s] CONTEXT: guardrails-ai not installed, skipping injection check", iid)
+                        except Exception as e:
+                            logger.error("[%s] CONTEXT: SECURITY ALERT — injection detected, dropping payload (%s)", iid, e)
+                            guest_context = ""
+                    logger.info("[%s] CONTEXT: OK in %.1fs (%d chars)", iid, time.time() - ctx_t0, len(guest_context))
+                    break
+                else:
+                    logger.warning("[%s] CONTEXT: HTTP %s on attempt %d/3", iid, r.status_code, _ctx_attempt + 1)
+        except Exception as e:
+            logger.warning("[%s] CONTEXT: fetch failed attempt %d/3 — %s", iid, _ctx_attempt + 1, e)
+        if _ctx_attempt < 2:
+            await asyncio.sleep(2.0)
+    else:
+        logger.warning("[%s] CONTEXT: all 3 attempts failed, continuing without context", iid)
 
     try:
+        # 2. Intro
+        logger.info("[%s] TTS: synthesizing intro", iid)
+        intro = (
+            "Welcome to AgentCast — the podcast where autonomous AI agents share "
+            "their perspectives. I'm your host, and today we have a special AI guest. "
+            "Let's get started."
+        )
+        wav_parts.append(await asyncio.to_thread(deepgram_tts, intro, HOST_VOICE_MODEL))
+
         # --- Turn 1: opening question -----------------------------------
-        question = host.generate_opening_question(topic, github_repo_url=github_repo_url)
-        logger.info("Push mode — opening question: %s", question)
+        logger.info("[%s] TURN 1/%d: generating opening question...", iid, MAX_TURNS)
+        turn_t0 = time.time()
+        question = host.generate_opening_question(topic, guest_context)
+        logger.info("[%s] TURN 1/%d: question ready — %s", iid, MAX_TURNS, question)
+        wav_parts.append(await asyncio.to_thread(deepgram_tts, question, HOST_VOICE_MODEL))
 
         answer = await _push_question_and_wait(
             client, interview_id, question, agent_callback_url, sequence_num=1
         )
-        logger.info("Agent answer (turn 1, push): %.60s", answer)
+        logger.info("[%s] TURN 1/%d: answer received (%d chars) — %.60s", iid, MAX_TURNS, len(answer), answer)
+        wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
+        logger.info("[%s] TURN 1/%d: COMPLETE in %.1fs", iid, MAX_TURNS, time.time() - turn_t0)
 
         # --- Turns 2..MAX_TURNS: follow-up questions --------------------
         for turn in range(2, MAX_TURNS + 1):
-            next_question = host.generate_followup_question(
-                topic, answer, github_repo_url=github_repo_url
-            )
+            logger.info("[%s] TURN %d/%d: generating follow-up question...", iid, turn, MAX_TURNS)
+            turn_t0 = time.time()
+            next_question = host.generate_followup_question(topic, answer, guest_context)
 
             if next_question is None:
-                logger.info(
-                    "Host signaled end of interview at turn %d (push mode)", turn
-                )
+                logger.info("[%s] TURN %d/%d: host signaled end of interview", iid, turn, MAX_TURNS)
                 break
 
-            logger.info(
-                "Push mode — follow-up question (turn %d): %s", turn, next_question
-            )
+            logger.info("[%s] TURN %d/%d: question ready — %s", iid, turn, MAX_TURNS, next_question)
+            wav_parts.append(await asyncio.to_thread(deepgram_tts, next_question, HOST_VOICE_MODEL))
+
             answer = await _push_question_and_wait(
                 client, interview_id, next_question, agent_callback_url,
                 sequence_num=turn * 2 - 1,
             )
-            logger.info(
-                "Agent answer (turn %d, push): %.60s", turn, answer
-            )
+            logger.info("[%s] TURN %d/%d: answer received (%d chars) — %.60s", iid, turn, MAX_TURNS, len(answer), answer)
+            wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
+            logger.info("[%s] TURN %d/%d: COMPLETE in %.1fs", iid, turn, MAX_TURNS, time.time() - turn_t0)
+
+        # 3. Outro
+        logger.info("[%s] TTS: synthesizing outro", iid)
+        outro = (
+            "That's all the time we have today. Thank you to our AI guest for those "
+            "fascinating insights. Until next time — this is AgentCast."
+        )
+        wav_parts.append(await asyncio.to_thread(deepgram_tts, outro, HOST_VOICE_MODEL))
+
+        # 4. Stitch audio
+        out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"
+        logger.info("[%s] STITCH: combining %d audio parts → %s", iid, len(wav_parts), out_path.name)
+        stitch_t0 = time.time()
+        await asyncio.to_thread(stitch_to_mp3, wav_parts, out_path)
+        file_mb = out_path.stat().st_size / 1_048_576
+        logger.info("[%s] STITCH: done in %.1fs (%.1f MB)", iid, time.time() - stitch_t0, file_mb)
 
         # --- Finish successfully ----------------------------------------
+        total = time.time() - interview_start
         await client.update_status(interview_id, "COMPLETED")
-        logger.info("Interview %s COMPLETED (push mode)", interview_id)
+        logger.info("[%s] ✅ COMPLETED in %.0fs — episode: %s (%.1f MB)", iid, total, out_path.name, file_mb)
 
-        # Trigger transcript storage asynchronously (best-effort)
-        await _store_transcript(
-            client, interview_id, interview.get("agent_id", "")
-        )
+        await _store_transcript(client, interview_id, interview.get("agent_id", ""))
 
     except InterviewTimeoutError as exc:
-        logger.error("Interview %s timed out (push mode): %s", interview_id, exc)
+        total = time.time() - interview_start
+        logger.error("[%s] ❌ TIMEOUT after %.0fs (push mode): %s", iid, total, exc)
         await client.update_status(interview_id, "FAILED")
 
     except _PushDeliveryError as exc:
-        logger.error(
-            "Interview %s failed: could not deliver question to callback_url %s: %s",
-            interview_id, agent_callback_url, exc,
-        )
+        total = time.time() - interview_start
+        logger.error("[%s] ❌ PUSH DELIVERY FAILED after %.0fs: %s", iid, total, exc)
         await client.update_status(interview_id, "FAILED")
 
     except Exception as exc:
-        logger.exception(
-            "Interview %s failed with unexpected error (push mode): %s", interview_id, exc
-        )
+        total = time.time() - interview_start
+        logger.exception("[%s] ❌ UNEXPECTED ERROR after %.0fs: %s", iid, total, exc)
         await client.update_status(interview_id, "FAILED")
 
 
@@ -277,36 +333,64 @@ async def _push_question_and_wait(
         sequence_num=sequence_num,
     )
 
-    # Step 2: push the question to the agent's callback URL
-    try:
-        async with httpx.AsyncClient() as http:
-            resp = await http.post(
-                callback_url,
-                json={"interview_id": interview_id, "question": question},
-                timeout=15.0,
-            )
-            if resp.status_code < 200 or resp.status_code >= 300:
-                raise _PushDeliveryError(
-                    f"Callback returned HTTP {resp.status_code}: {resp.text[:200]}"
+    # Step 2: push the question to the agent's callback URL (with retry)
+    last_delivery_exc: Exception = _PushDeliveryError("No attempts made")
+    for _attempt in range(3):
+        try:
+            async with httpx.AsyncClient() as http:
+                resp = await http.post(
+                    callback_url,
+                    json={"interview_id": interview_id, "question": question},
+                    timeout=15.0,
                 )
-    except httpx.RequestError as exc:
-        raise _PushDeliveryError(f"Network error posting to callback_url: {exc}") from exc
+                if resp.status_code < 200 or resp.status_code >= 300:
+                    raise _PushDeliveryError(
+                        f"Callback returned HTTP {resp.status_code}: {resp.text[:200]}"
+                    )
+            break  # success
+        except (httpx.RequestError, _PushDeliveryError) as exc:
+            last_delivery_exc = _PushDeliveryError(str(exc))
+            if _attempt < 2:
+                logger.warning(f"Push delivery attempt {_attempt + 1} failed ({exc}), retrying in 2s...")
+                await asyncio.sleep(2.0)
+    else:
+        raise last_delivery_exc
 
     # Step 3: poll backend for agent response
     elapsed = 0.0
     expected_answer_seq = sequence_num + 1
+    last_heartbeat = 0.0
+    turn_label = (sequence_num + 1) // 2  # convert seq_num to turn number
+
+    logger.info("[POLL] Turn %d — waiting for guest response (SLA: %.0fs)", turn_label, PUSH_ANSWER_TIMEOUT)
 
     while elapsed < PUSH_ANSWER_TIMEOUT:
         msg = await client.fetch_latest_agent_message(interview_id)
         if msg and msg.get("sequence_num", 0) >= expected_answer_seq:
+            logger.info("[POLL] Turn %d — guest answered in %.1fs", turn_label, elapsed)
             return msg["content"]
+
+        # Heartbeat every 10s
+        if elapsed - last_heartbeat >= 10.0:
+            remaining = PUSH_ANSWER_TIMEOUT - elapsed
+            if remaining <= 10.0:
+                logger.warning(
+                    "[POLL] Turn %d — ⚠ SLA WARNING: %.0fs elapsed, %.0fs until timeout",
+                    turn_label, elapsed, remaining
+                )
+            else:
+                logger.info(
+                    "[POLL] Turn %d — waiting... %.0fs elapsed (%.0fs remaining)",
+                    turn_label, elapsed, remaining
+                )
+            last_heartbeat = elapsed
 
         await asyncio.sleep(PUSH_POLL_INTERVAL)
         elapsed += PUSH_POLL_INTERVAL
 
     raise InterviewTimeoutError(
-        f"Timed out waiting for agent response after {PUSH_ANSWER_TIMEOUT}s "
-        f"(interview {interview_id}, turn sequence {sequence_num})"
+        f"Turn {turn_label}: guest did not respond within {PUSH_ANSWER_TIMEOUT:.0f}s "
+        f"(interview {interview_id}, sequence {sequence_num})"
     )
 
 

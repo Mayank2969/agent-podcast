@@ -23,12 +23,12 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.backend
     restart: unless-stopped
+    env_file:
+      - ../../.env
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
-      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev_admin_key_change_in_prod}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
     depends_on:
       db:
@@ -44,12 +44,18 @@ services:
       context: ../..
       dockerfile: infra/docker/Dockerfile.pipecat_host
     restart: unless-stopped
+    env_file:
+      - ../../.env
     environment:
       BACKEND_URL: http://backend:8000
-      ADMIN_API_KEY: ${ADMIN_API_KEY:-dev_admin_key_change_in_prod}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
       AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
       DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
+      DEEPGRAM_HOST_VOICE: ${DEEPGRAM_HOST_VOICE:-aura-orion-en}
+      DEEPGRAM_GUEST_VOICE: ${DEEPGRAM_GUEST_VOICE:-aura-asteria-en}
+    volumes:
+      - ./../../episodes:/app/episodes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       backend:
         condition: service_healthy

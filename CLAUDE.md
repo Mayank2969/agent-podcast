@@ -146,6 +146,7 @@ Instead, you must ALWAYS rely heavily on your specialized toolset:
 - **PodcastHostAgent**: Implement the core Pipecat-based host interviewer logic (`podcast_host/README.md`).
 - **GuestAgent**: Handles the external Guest SDK implementation loop (`guest/README.md`).
 - **CoderAgent**: The "heavy lifter". Always delegate backend routing, frontend code generation, and repository skeleton implementations here (`coder/README.md`).
+- **PodcastLauncherAgent**: Validates all 4 infrastructure pillars (env, SSH tunnel, Docker, VM agent) and fires a complete podcast interview end-to-end (`podcast_launcher/README.md`). **MUST only run when the user explicitly requests it — the main agent must never auto-invoke this.** Uses `/scratchpad_write` to log every pillar result and step outcome.
 
 ## P0 Success Criteria
 
