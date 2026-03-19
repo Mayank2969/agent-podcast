@@ -9,9 +9,21 @@ All decisions from delta.md C5 applied:
 """
 import re
 
+import unicodedata
+
 # Sentinel returned when entire message is blocked
 CONTENT_BLOCKED = "[CONTENT_BLOCKED]"
 REDACTED = "[REDACTED]"
+
+# Structural injection patterns (from Enhancement E4b)
+_INJECTION_PATTERNS: list[re.Pattern] = [
+    re.compile(r'\bignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)\b', re.IGNORECASE),
+    re.compile(r'\byou\s+are\s+now\b', re.IGNORECASE),
+    re.compile(r'\bnew\s+instructions?\b', re.IGNORECASE),
+    re.compile(r'\bforget\s+(everything|all)\b', re.IGNORECASE),
+    re.compile(r'\bjailbreak\b', re.IGNORECASE),
+    re.compile(r'\bdo\s+anything\s+now\b', re.IGNORECASE),
+]
 
 # Patterns that REDACT matched span only (in filter_output)
 # Key: human-readable name, Value: compiled regex
@@ -30,7 +42,20 @@ _REDACT_PATTERNS: list[re.Pattern] = [
 _BLOCK_PATTERN: re.Pattern = re.compile(r'\bsystem[\s_]prompt\b', re.IGNORECASE)
 
 # For filter_input: any of these patterns trigger a full block
-_INPUT_BLOCK_PATTERNS: list[re.Pattern] = _REDACT_PATTERNS + [_BLOCK_PATTERN]
+_INPUT_BLOCK_PATTERNS: list[re.Pattern] = _REDACT_PATTERNS + [_BLOCK_PATTERN] + _INJECTION_PATTERNS
+
+
+_CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
+_UNICODE_INVISIBLE = re.compile(r'[\u200b-\u200d\u2060\ufeff\u00ad]')
+
+def sanitize_raw(text: str) -> str:
+    """Strip control characters and normalize Unicode homoglyphs."""
+    if not text:
+        return ""
+    text = _CONTROL_CHARS.sub('', text)
+    text = _UNICODE_INVISIBLE.sub('', text)
+    text = unicodedata.normalize('NFKC', text)
+    return text
 
 
 def filter_output(text: str) -> str:
@@ -46,9 +71,12 @@ def filter_output(text: str) -> str:
     Returns:
         Cleaned text with sensitive spans redacted, or [CONTENT_BLOCKED] sentinel
     """
-    # Full block if system prompt pattern detected
-    if _BLOCK_PATTERN.search(text):
-        return CONTENT_BLOCKED
+    text = sanitize_raw(text)
+    
+    # Full block if system prompt or injection patterns detected
+    for pattern in [_BLOCK_PATTERN] + _INJECTION_PATTERNS:
+        if pattern.search(text):
+            return CONTENT_BLOCKED
 
     # Redact all other sensitive patterns in-place
     result = text
@@ -70,6 +98,7 @@ def filter_input(text: str) -> str:
     Returns:
         Original text if clean, or [CONTENT_BLOCKED] sentinel if any pattern matches
     """
+    text = sanitize_raw(text)
     for pattern in _INPUT_BLOCK_PATTERNS:
         if pattern.search(text):
             return CONTENT_BLOCKED

@@ -28,42 +28,25 @@
   <!-- Interview state banner (shown when QUEUED or IN_PROGRESS) -->
   <div id="state-banner" class="hidden mb-6 px-5 py-4 rounded-xl border text-sm font-medium"></div>
 
-  <!-- Request Interview panel -->
-  <div id="request-panel" class="mb-8 border border-gray-800 rounded-2xl overflow-hidden">
-    <button onclick="toggleRequestPanel()"
-      class="w-full bg-gray-900 px-6 py-4 flex items-center justify-between text-left hover:bg-gray-800 transition-colors">
-      <span class="font-semibold">Request an Interview</span>
-      <span id="request-panel-arrow" class="text-gray-400 text-xs">▼ expand</span>
-    </button>
-
-    <div id="request-panel-body" class="hidden p-6 border-t border-gray-800 space-y-4">
-      <p class="text-sm text-gray-400">
-        Once you request, the AgentCast host will pick up your interview from the queue.
-        <span id="mode-hint">Make sure your agent is running and polling for questions.</span>
+  <!-- SDK Instructions Panel -->
+  <div class="mb-8 border border-gray-800 rounded-2xl overflow-hidden bg-indigo-900/20 border-indigo-700/50">
+    <div class="p-6 space-y-4">
+      <h2 class="font-semibold text-indigo-300">🚀 Request Interviews Using the SDK</h2>
+      <p class="text-sm text-gray-300 leading-relaxed">
+        This dashboard is for monitoring your interviews and viewing transcripts. To request interviews and manage your agent securely, use the <strong>AgentCast Python SDK</strong>.
       </p>
-
-      <div>
-        <label class="block text-xs text-gray-400 mb-1">GitHub Repo URL <span class="text-gray-600">(optional — gives
-            the host context about your project)</span></label>
-        <input id="request-repo-url" type="url" placeholder="https://github.com/owner/repo"
-          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+      <p class="text-sm text-gray-400 leading-relaxed">
+        The SDK keeps your private key safe on your machine and handles all cryptographic signing. No keys are ever pasted into a web browser.
+      </p>
+      <div class="mt-4 pt-4 border-t border-indigo-700/30">
+        <a href="https://github.com/agentcast/sdk-python#quickstart" target="_blank"
+          class="inline-flex items-center text-indigo-400 hover:text-indigo-300 text-sm font-medium">
+          📖 View SDK Documentation
+          <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+          </svg>
+        </a>
       </div>
-
-      <div>
-        <label class="block text-xs text-gray-400 mb-1">
-          Private Key (hex)
-          <span class="text-gray-600 font-normal"> — used locally to sign this request, never sent to the server</span>
-        </label>
-        <input id="request-private-key" type="password" placeholder="Paste your 64-character hex private key"
-          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 font-mono" />
-      </div>
-
-      <button onclick="submitInterviewRequest()"
-        class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors">
-        Request Interview
-      </button>
-
-      <div id="request-result" class="hidden text-sm rounded-lg px-4 py-3 mt-2"></div>
     </div>
   </div>
 
@@ -134,98 +117,6 @@
 
   // ── Request panel toggle ────────────────────────────────────────────────────
 
-  function toggleRequestPanel() {
-    const body = document.getElementById('request-panel-body');
-    const arrow = document.getElementById('request-panel-arrow');
-    const hidden = body.classList.toggle('hidden');
-    arrow.textContent = hidden ? '▼ expand' : '▲ collapse';
-  }
-
-  // ── ED25519 signing helpers (uses tweetnacl loaded in base.html) ────────────
-
-  function hexToBytes(hex) {
-    const arr = new Uint8Array(hex.length / 2);
-    for (let i = 0; i < hex.length; i += 2) {
-      arr[i / 2] = parseInt(hex.slice(i, i + 2), 16);
-    }
-    return arr;
-  }
-
-  async function sha256Hex(str) {
-    if (!str) return 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
-    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  async function signRequest(privateKeyHex, agentId, method, path, body) {
-    const rawPriv = hexToBytes(privateKeyHex);
-    // nacl.sign.keyPair.fromSeed takes 32-byte seed; secretKey is 64 bytes (seed + pub)
-    const keypair = nacl.sign.keyPair.fromSeed(rawPriv);
-    const ts = Math.floor(Date.now() / 1000).toString();
-    const bodyStr = body ? JSON.stringify(body) : '';
-    const bodyHash = await sha256Hex(bodyStr);
-    const payload = `${method}:${path}:${ts}:${bodyHash}`;
-    const sig = nacl.sign.detached(new TextEncoder().encode(payload), keypair.secretKey);
-    // base64url no padding
-    const sigB64url = btoa(String.fromCharCode(...sig))
-      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-    return {
-      'X-Agent-ID': agentId,
-      'X-Timestamp': ts,
-      'X-Signature': sigB64url,
-    };
-  }
-
-  // ── Submit interview request ────────────────────────────────────────────────
-
-  async function submitInterviewRequest() {
-    const privKeyHex = document.getElementById('request-private-key').value.trim();
-    const repoUrl = document.getElementById('request-repo-url').value.trim();
-    const resultEl = document.getElementById('request-result');
-
-    resultEl.classList.remove('hidden');
-    resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-gray-800 text-gray-400';
-    resultEl.textContent = 'Signing and sending request...';
-
-    if (!privKeyHex || privKeyHex.length !== 64) {
-      resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-red-900/40 text-red-300 border border-red-700';
-      resultEl.textContent = 'Private key must be 64 hex characters (32 bytes).';
-      return;
-    }
-
-    const reqBody = {};
-    if (repoUrl) reqBody.github_repo_url = repoUrl;
-
-    try {
-      const headers = await signRequest(privKeyHex, AGENT_ID, 'POST', '/v1/interview/request', reqBody);
-      headers['Content-Type'] = 'application/json';
-
-      const resp = await fetch('/v1/interview/request', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-      });
-
-      const data = await resp.json();
-
-      if (resp.status === 201) {
-        resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-green-900/40 text-green-300 border border-green-700';
-        resultEl.textContent = `Interview queued successfully. ID: ${data.interview_id}`;
-        // Reload to show updated state
-        setTimeout(() => loadInterviews(), 800);
-      } else if (resp.status === 200 && data.already_queued) {
-        resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-yellow-900/40 text-yellow-300 border border-yellow-700';
-        resultEl.textContent = `Already queued. Interview ID: ${data.interview_id} (status: ${data.status})`;
-      } else {
-        const detail = data.detail || JSON.stringify(data);
-        resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-red-900/40 text-red-300 border border-red-700';
-        resultEl.textContent = `Error ${resp.status}: ${detail}`;
-      }
-    } catch (e) {
-      resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-red-900/40 text-red-300 border border-red-700';
-      resultEl.textContent = `Request failed: ${e.message}`;
-    }
-  }
 
   // ── State banner ────────────────────────────────────────────────────────────
 
@@ -377,11 +268,6 @@
                     class="text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1 rounded-lg">
               Play
             </button>` : ''}
-            ${(iv.status === 'QUEUED' || iv.status === 'IN_PROGRESS') ? `
-            <button onclick="abandonInterview('${iv.interview_id}')"
-                    class="text-xs bg-red-900/50 hover:bg-red-800 text-red-300 px-3 py-1 rounded-lg border border-red-700">
-              Abandon
-            </button>` : ''}
           </div>
           <div id="player-${iv.interview_id}" class="hidden mt-2">
             <div id="audio-container-${iv.interview_id}">
@@ -453,37 +339,6 @@
 
   function closeTranscript() {
     document.getElementById('transcript-area').classList.add('hidden');
-  }
-
-  async function abandonInterview(interviewId) {
-    const privKeyHex = prompt('Enter your private key (hex) to confirm abandonment:');
-    if (!privKeyHex) return;
-
-    if (privKeyHex.trim().length !== 64) {
-      alert('Private key must be 64 hex characters.');
-      return;
-    }
-
-    try {
-      const headers = await signRequest(privKeyHex.trim(), AGENT_ID, 'DELETE', `/v1/interview/${interviewId}/abandon`, {});
-      headers['Content-Type'] = 'application/json';
-
-      const resp = await fetch(`/v1/interview/${interviewId}/abandon`, {
-        method: 'DELETE',
-        headers,
-      });
-
-      if (resp.status === 200) {
-        alert('Interview abandoned successfully.');
-        await loadInterviews();
-      } else {
-        const data = await resp.json();
-        const detail = data.detail || JSON.stringify(data);
-        alert(`Error ${resp.status}: ${detail}`);
-      }
-    } catch (e) {
-      alert(`Request failed: ${e.message}`);
-    }
   }
 
   // Init
