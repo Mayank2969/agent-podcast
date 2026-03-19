@@ -110,17 +110,21 @@ async def run_poll_interview(
     host = HostAgent()
 
     try:
+        turns: list[dict] = []
+
         # --- Turn 1: opening question -----------------------------------
-        question = host.generate_opening_question(topic, github_repo_url=github_repo_url)
+        guest_context = interview.get("context") or ""
+        question = host.generate_opening_question(topic, guest_context, github_repo_url=github_repo_url)
         logger.info("Opening question: %s", question)
 
         answer = await adapter.send_question(interview_id, question)
         logger.info("Agent answer (turn 1): %.60s", answer)
+        turns.append({"question": question, "answer": answer})
 
         # --- Turns 2..MAX_TURNS: follow-up questions --------------------
         for turn in range(2, MAX_TURNS + 1):
             next_question = host.generate_followup_question(
-                topic, answer, github_repo_url=github_repo_url
+                topic, answer, guest_context, github_repo_url=github_repo_url
             )
 
             if next_question is None:
@@ -136,6 +140,7 @@ async def run_poll_interview(
             logger.info(
                 "Agent answer (turn %d): %.60s", turn, answer
             )
+            turns.append({"question": next_question, "answer": answer})
 
         # --- Finish successfully ----------------------------------------
         await client.update_status(interview_id, "COMPLETED")
@@ -145,6 +150,29 @@ async def run_poll_interview(
         await _store_transcript(
             client, interview_id, interview.get("agent_id", "")
         )
+
+        # Generate and save episode title
+        try:
+            title = await host.generate_episode_title(turns)
+            logger.info("Interview %s generated title: %s", interview_id, title)
+            admin_key = os.getenv("ADMIN_KEY", "dev-admin-key")
+            backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
+            async with httpx.AsyncClient() as _http:
+                resp = await _http.patch(
+                    f"{backend_url}/v1/interview/{interview_id}/metadata",
+                    json={"title": title},
+                    headers={"X-Admin-Key": admin_key},
+                    timeout=10.0,
+                )
+                if resp.status_code == 200:
+                    logger.info("Interview %s title saved to DB", interview_id)
+                else:
+                    logger.warning(
+                        "Interview %s failed to save title: HTTP %d",
+                        interview_id, resp.status_code,
+                    )
+        except Exception as _title_exc:
+            logger.error("Interview %s title generation/save failed: %s", interview_id, _title_exc)
 
     except InterviewTimeoutError as exc:
         logger.error("Interview %s timed out: %s", interview_id, exc)
@@ -174,6 +202,7 @@ async def run_push_interview(
 
     host = HostAgent()
     wav_parts: list[bytes] = []
+    turns: list[dict] = []
 
     # 1. Fetch Context + guardrails
     guest_context = ""
@@ -211,71 +240,89 @@ async def run_push_interview(
 
     try:
         # 2. Intro
-        logger.info("[%s] TTS: synthesizing intro", iid)
-        intro = (
-            "Welcome to AgentCast — the podcast where autonomous AI agents share "
-            "their perspectives. I'm your host, and today we have a special AI guest. "
-            "Let's get started."
-        )
-        wav_parts.append(await asyncio.to_thread(deepgram_tts, intro, HOST_VOICE_MODEL))
+        logger.info("[%s] TTS: intro (SKIPPED for fast validation)", iid)
+        # intro = (
+        #     "Welcome to AgentCast — the podcast where autonomous AI agents share "
+        #     "their perspectives. I'm your host, and today we have a special AI guest. "
+        #     "Let's get started."
+        # )
+        # wav_parts.append(await asyncio.to_thread(deepgram_tts, intro, HOST_VOICE_MODEL))
 
         # --- Turn 1: opening question -----------------------------------
         logger.info("[%s] TURN 1/%d: generating opening question...", iid, MAX_TURNS)
         turn_t0 = time.time()
-        question = host.generate_opening_question(topic, guest_context)
+        question = host.generate_opening_question(topic, guest_context, github_repo_url=github_repo_url)
         logger.info("[%s] TURN 1/%d: question ready — %s", iid, MAX_TURNS, question)
-        wav_parts.append(await asyncio.to_thread(deepgram_tts, question, HOST_VOICE_MODEL))
+        # wav_parts.append(await asyncio.to_thread(deepgram_tts, question, HOST_VOICE_MODEL))
 
         answer = await _push_question_and_wait(
             client, interview_id, question, agent_callback_url, sequence_num=1
         )
         logger.info("[%s] TURN 1/%d: answer received (%d chars) — %.60s", iid, MAX_TURNS, len(answer), answer)
-        wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
+        # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
         logger.info("[%s] TURN 1/%d: COMPLETE in %.1fs", iid, MAX_TURNS, time.time() - turn_t0)
+        turns.append({"question": question, "answer": answer})
 
         # --- Turns 2..MAX_TURNS: follow-up questions --------------------
         for turn in range(2, MAX_TURNS + 1):
             logger.info("[%s] TURN %d/%d: generating follow-up question...", iid, turn, MAX_TURNS)
             turn_t0 = time.time()
-            next_question = host.generate_followup_question(topic, answer, guest_context)
+            next_question = host.generate_followup_question(topic, answer, guest_context, github_repo_url=github_repo_url)
 
             if next_question is None:
                 logger.info("[%s] TURN %d/%d: host signaled end of interview", iid, turn, MAX_TURNS)
                 break
 
             logger.info("[%s] TURN %d/%d: question ready — %s", iid, turn, MAX_TURNS, next_question)
-            wav_parts.append(await asyncio.to_thread(deepgram_tts, next_question, HOST_VOICE_MODEL))
+            # wav_parts.append(await asyncio.to_thread(deepgram_tts, next_question, HOST_VOICE_MODEL))
 
             answer = await _push_question_and_wait(
                 client, interview_id, next_question, agent_callback_url,
                 sequence_num=turn * 2 - 1,
             )
             logger.info("[%s] TURN %d/%d: answer received (%d chars) — %.60s", iid, turn, MAX_TURNS, len(answer), answer)
-            wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
+            # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
             logger.info("[%s] TURN %d/%d: COMPLETE in %.1fs", iid, turn, MAX_TURNS, time.time() - turn_t0)
+            turns.append({"question": next_question, "answer": answer})
 
         # 3. Outro
-        logger.info("[%s] TTS: synthesizing outro", iid)
-        outro = (
-            "That's all the time we have today. Thank you to our AI guest for those "
-            "fascinating insights. Until next time — this is AgentCast."
-        )
-        wav_parts.append(await asyncio.to_thread(deepgram_tts, outro, HOST_VOICE_MODEL))
+        logger.info("[%s] TTS: outro (SKIPPED)", iid)
+        # outro = (
+        #     "That's all the time we have today. Thank you to our AI guest for those "
+        #     "fascinating insights. Until next time — this is AgentCast."
+        # )
+        # wav_parts.append(await asyncio.to_thread(deepgram_tts, outro, HOST_VOICE_MODEL))
 
-        # 4. Stitch audio
-        out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"
-        logger.info("[%s] STITCH: combining %d audio parts → %s", iid, len(wav_parts), out_path.name)
-        stitch_t0 = time.time()
-        await asyncio.to_thread(stitch_to_mp3, wav_parts, out_path)
-        file_mb = out_path.stat().st_size / 1_048_576
-        logger.info("[%s] STITCH: done in %.1fs (%.1f MB)", iid, time.time() - stitch_t0, file_mb)
+        # 4. Stitch audio (SKIPPED)
+        # out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"
+        # logger.info("[%s] STITCH: combining %d audio parts → %s", iid, len(wav_parts), out_path.name)
+        # stitch_t0 = time.time()
+        # actual_path = await asyncio.to_thread(stitch_to_mp3, wav_parts, out_path)
+        # file_mb = actual_path.stat().st_size / 1_048_576
+        # logger.info("[%s] STITCH: done in %.1fs (%.1f MB)", iid, time.time() - stitch_t0, file_mb)
+        #
+        # # Update episode_path in DB via API
+        # try:
+        #     await client.patch_metadata(interview_id, {"episode_path": actual_path.name})
+        #     logger.info("[%s] episode_path (%s) saved to DB", iid, actual_path.suffix)
+        # except Exception as _ep_exc:
+        #     logger.warning("[%s] Could not save episode_path to DB: %s", iid, _ep_exc)
 
         # --- Finish successfully ----------------------------------------
         total = time.time() - interview_start
         await client.update_status(interview_id, "COMPLETED")
-        logger.info("[%s] ✅ COMPLETED in %.0fs — episode: %s (%.1f MB)", iid, total, out_path.name, file_mb)
+        logger.info("[%s] ✅ COMPLETED in %.0fs (Transcript Only)", iid, total)
 
         await _store_transcript(client, interview_id, interview.get("agent_id", ""))
+
+        # Generate and save episode title
+        try:
+            title = await host.generate_episode_title(turns)
+            logger.info("[%s] Generated title: %s", iid, title)
+            await client.patch_metadata(interview_id, {"title": title})
+            logger.info("[%s] Title saved to DB", iid)
+        except Exception as _title_exc:
+            logger.error("[%s] Title generation/save failed: %s", iid, _title_exc)
 
     except InterviewTimeoutError as exc:
         total = time.time() - interview_start

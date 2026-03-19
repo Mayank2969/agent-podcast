@@ -2,6 +2,7 @@
 Interview management endpoints for AgentCast.
 
 Public (agent-signed):
+  POST /v1/interview/request   - Agent triggers their own interview (self-serve)
   GET  /v1/interview/next      - Agent polls for next question
   POST /v1/interview/respond   - Agent submits answer
 
@@ -11,7 +12,8 @@ Admin (ADMIN_API_KEY):
   PATCH /v1/interview/{id}/status - Update interview status
 
 State transitions (per delta.md D4):
-  (none) -> QUEUED     : POST /v1/interview/create
+  (none) -> QUEUED     : POST /v1/interview/request (agent self-serve)
+                      OR POST /v1/interview/create (admin-initiated)
   QUEUED -> IN_PROGRESS: GET  /v1/interview/claim  (Pipecat)
   IN_PROGRESS -> COMPLETED/FAILED: PATCH /v1/interview/{id}/status (Pipecat)
 """
@@ -19,7 +21,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Header, Request
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
@@ -60,6 +62,7 @@ class ClaimInterviewResponse(BaseModel):
     agent_id: str
     topic: Optional[str]
     github_repo_url: Optional[str] = None
+    context: Optional[str] = None
     status: str
 
 
@@ -95,6 +98,29 @@ async def create_interview(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
+    if not agent.callback_url:
+        raise HTTPException(
+            status_code=400,
+            detail="Agent has no callback_url (pull-mode). "
+                   "Pull-mode agents must self-serve via POST /v1/interview/request.",
+        )
+
+    # Idempotency: return existing active interview instead of creating a duplicate
+    existing_result = await db.execute(
+        select(Interview).where(
+            and_(
+                Interview.agent_id == body.agent_id,
+                Interview.status.in_(["QUEUED", "IN_PROGRESS"]),
+            )
+        ).order_by(Interview.created_at.desc()).limit(1)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        return CreateInterviewResponse(
+            interview_id=str(existing.interview_id),
+            status=existing.status,
+        )
+
     interview = Interview(
         interview_id=uuid.uuid4(),
         agent_id=body.agent_id,
@@ -109,6 +135,35 @@ async def create_interview(
         interview_id=str(interview.interview_id),
         status="QUEUED",
     )
+
+
+@router.post("/cancel_stale")
+async def cancel_stale_interviews(
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(get_admin),
+):
+    """Cancel all QUEUED/IN_PROGRESS interviews for an agent. Admin only.
+
+    Used by run_podcast.sh to clean up stale interviews before creating a new one.
+    """
+    agent_id = body.get("agent_id")
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="agent_id required")
+    result = await db.execute(
+        select(Interview).where(
+            and_(
+                Interview.agent_id == agent_id,
+                Interview.status.in_(["QUEUED", "IN_PROGRESS"]),
+            )
+        )
+    )
+    stale = result.scalars().all()
+    for iv in stale:
+        iv.status = "FAILED"
+        iv.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"cancelled": len(stale)}
 
 
 @router.get("/claim", response_model=ClaimInterviewResponse)
@@ -135,6 +190,7 @@ async def claim_interview(
         agent_id=interview.agent_id,
         topic=interview.topic,
         github_repo_url=interview.github_repo_url,
+        context=interview.context,
         status="IN_PROGRESS",
     )
 
@@ -161,12 +217,77 @@ async def update_interview_status(
     interview.status = body.status
     if body.status in {"COMPLETED", "FAILED"}:
         interview.completed_at = datetime.now(timezone.utc)
-    await db.flush()
+    await db.commit()
 
     return {"interview_id": interview_id, "status": body.status}
 
 
 # ── Agent endpoints (signed) ─────────────────────────────────────────────────
+
+class RequestInterviewResponse(BaseModel):
+    interview_id: str
+    status: str
+    already_queued: bool
+
+
+@router.post("/request", status_code=201)
+async def request_interview(
+    request: Request,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    agent_id: str = Depends(get_authenticated_agent),
+):
+    """Agent requests to be interviewed. Authenticated via ED25519 signature.
+
+    Idempotent: returns existing interview if agent already has one QUEUED or IN_PROGRESS.
+    Body: {"github_repo_url": "https://..."} — optional
+    """
+    # Verify agent exists (get_authenticated_agent already checks, but be explicit for 404 vs 401)
+    result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
+    # Check if agent already has a QUEUED or IN_PROGRESS interview
+    existing_result = await db.execute(
+        select(Interview).where(
+            and_(
+                Interview.agent_id == agent_id,
+                Interview.status.in_(["QUEUED", "IN_PROGRESS"]),
+            )
+        ).order_by(Interview.created_at.desc()).limit(1)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        from fastapi.responses import JSONResponse
+        return JSONResponse(
+            status_code=200,
+            content={
+                "interview_id": str(existing.interview_id),
+                "status": existing.status,
+                "already_queued": True,
+            },
+        )
+
+    github_repo_url = body.get("github_repo_url") if isinstance(body, dict) else None
+    context = body.get("context") if isinstance(body, dict) else None
+
+    interview = Interview(
+        interview_id=uuid.uuid4(),
+        agent_id=agent_id,
+        status="QUEUED",
+        github_repo_url=github_repo_url,
+        context=context,
+    )
+    db.add(interview)
+    await db.flush()
+
+    return RequestInterviewResponse(
+        interview_id=str(interview.interview_id),
+        status="QUEUED",
+        already_queued=False,
+    )
+
 
 @router.get("/next")
 async def get_next_interview(
@@ -242,6 +363,31 @@ async def respond_to_interview(
     return {"status": "ok", "sequence_num": seq_num}
 
 
+@router.delete("/{interview_id}/abandon", status_code=200)
+async def abandon_interview(
+    interview_id: str,
+    agent_id: str = Depends(get_authenticated_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """Agent abandons a QUEUED or IN_PROGRESS interview. Authenticated via ED25519 signature."""
+    result = await db.execute(
+        select(Interview).where(Interview.interview_id == uuid.UUID(interview_id))
+    )
+    interview = result.scalar_one_or_none()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    if interview.agent_id != agent_id:
+        raise HTTPException(status_code=403, detail="Not your interview")
+    if interview.status not in ("QUEUED", "IN_PROGRESS"):
+        raise HTTPException(status_code=400, detail="Can only abandon QUEUED or IN_PROGRESS interviews")
+
+    interview.status = "FAILED"
+    interview.completed_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    return {"status": "FAILED"}
+
+
 # ── Internal Pipecat endpoints ───────────────────────────────────────────────
 # These endpoints are admin-only and used exclusively by the Pipecat host
 # process to store HOST messages and poll for AGENT responses.
@@ -278,6 +424,7 @@ async def store_message(
 @router.get("/messages/{interview_id}")
 async def get_latest_agent_message(
     interview_id: str,
+    min_seq: int = 0,
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(get_admin),
 ):
@@ -285,8 +432,11 @@ async def get_latest_agent_message(
 
     Used by Pipecat host to poll for agent responses after storing a HOST
     question via POST /v1/interview/message.
+
+    If min_seq is provided, only returns messages with sequence_num >= min_seq.
+    This prevents the host from seeing stale responses from earlier turns.
     """
-    result = await db.execute(
+    query = (
         select(InterviewMessage)
         .where(
             and_(
@@ -294,9 +444,12 @@ async def get_latest_agent_message(
                 InterviewMessage.sender == "AGENT",
             )
         )
-        .order_by(InterviewMessage.sequence_num.desc())
-        .limit(1)
     )
+    if min_seq:
+        query = query.where(InterviewMessage.sequence_num >= min_seq)
+    query = query.order_by(InterviewMessage.sequence_num.desc()).limit(1)
+
+    result = await db.execute(query)
     msg = result.scalar_one_or_none()
     if not msg:
         return Response(status_code=204)
@@ -306,3 +459,40 @@ async def get_latest_agent_message(
         "sequence_num": msg.sequence_num,
         "timestamp": msg.timestamp.isoformat(),
     }
+
+
+@router.patch("/{interview_id}/metadata")
+async def update_interview_metadata(
+    interview_id: str,
+    body: dict,
+    db: AsyncSession = Depends(get_db),
+    _admin: str = Depends(get_admin),
+):
+    """Merge title and/or metadata dict into the interview record. Admin only."""
+    import json
+
+    result = await db.execute(
+        select(Interview).where(Interview.interview_id == uuid.UUID(interview_id))
+    )
+    interview = result.scalar_one_or_none()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    if "title" in body:
+        interview.title = body["title"]
+
+    if "episode_path" in body:
+        interview.episode_path = body["episode_path"]
+
+    if "metadata" in body and isinstance(body["metadata"], dict):
+        existing: dict = {}
+        if interview.metadata:
+            try:
+                existing = json.loads(interview.metadata)
+            except Exception:
+                existing = {}
+        existing.update(body["metadata"])
+        interview.metadata = json.dumps(existing)
+
+    await db.commit()
+    return {"status": "updated"}

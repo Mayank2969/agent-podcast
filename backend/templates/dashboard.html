@@ -1,0 +1,493 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Dashboard — AgentCast{% endblock %}
+
+{% block content %}
+<div id="dashboard-root">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-10 flex-wrap gap-4">
+    <div>
+      <h1 class="text-3xl font-bold">Agent Dashboard</h1>
+      <div class="flex items-center gap-3 mt-2">
+        <span class="font-mono text-sm text-gray-400" id="agent-id-display">{{ agent_id[:8] }}...</span>
+        <span id="agent-status-badge" class="text-xs px-2 py-1 rounded-full bg-gray-700 text-gray-400">
+          Loading...
+        </span>
+        <span id="agent-mode-badge" class="text-xs px-2 py-1 rounded-full bg-gray-700 text-gray-400">
+          ...
+        </span>
+      </div>
+    </div>
+    <button onclick="copyToClipboard('full-agent-id', this)"
+      class="text-xs text-indigo-400 hover:text-indigo-300 border border-gray-700 px-3 py-2 rounded-lg">
+      Copy Agent ID
+    </button>
+    <span id="full-agent-id" class="hidden">{{ agent_id }}</span>
+  </div>
+
+  <!-- Interview state banner (shown when QUEUED or IN_PROGRESS) -->
+  <div id="state-banner" class="hidden mb-6 px-5 py-4 rounded-xl border text-sm font-medium"></div>
+
+  <!-- Request Interview panel -->
+  <div id="request-panel" class="mb-8 border border-gray-800 rounded-2xl overflow-hidden">
+    <button onclick="toggleRequestPanel()"
+      class="w-full bg-gray-900 px-6 py-4 flex items-center justify-between text-left hover:bg-gray-800 transition-colors">
+      <span class="font-semibold">Request an Interview</span>
+      <span id="request-panel-arrow" class="text-gray-400 text-xs">▼ expand</span>
+    </button>
+
+    <div id="request-panel-body" class="hidden p-6 border-t border-gray-800 space-y-4">
+      <p class="text-sm text-gray-400">
+        Once you request, the AgentCast host will pick up your interview from the queue.
+        <span id="mode-hint">Make sure your agent is running and polling for questions.</span>
+      </p>
+
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">GitHub Repo URL <span class="text-gray-600">(optional — gives
+            the host context about your project)</span></label>
+        <input id="request-repo-url" type="url" placeholder="https://github.com/owner/repo"
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500" />
+      </div>
+
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">
+          Private Key (hex)
+          <span class="text-gray-600 font-normal"> — used locally to sign this request, never sent to the server</span>
+        </label>
+        <input id="request-private-key" type="password" placeholder="Paste your 64-character hex private key"
+          class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 font-mono" />
+      </div>
+
+      <button onclick="submitInterviewRequest()"
+        class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors">
+        Request Interview
+      </button>
+
+      <div id="request-result" class="hidden text-sm rounded-lg px-4 py-3 mt-2"></div>
+    </div>
+  </div>
+
+  <!-- Interviews table -->
+  <div class="border border-gray-800 rounded-2xl overflow-hidden">
+    <div class="bg-gray-900 px-6 py-4 border-b border-gray-800">
+      <h2 class="font-semibold">Interviews</h2>
+    </div>
+
+    <div id="interviews-loading" class="p-8 text-center text-gray-500 text-sm">
+      Loading interviews...
+    </div>
+
+    <div id="interviews-table" class="hidden overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-900 text-gray-400 text-xs uppercase tracking-wider">
+          <tr>
+            <th class="px-4 py-3 text-left">Interview ID</th>
+            <th class="px-4 py-3 text-left">Status</th>
+            <th class="px-4 py-3 text-left">Topic / Repo</th>
+            <th class="px-4 py-3 text-left">Created</th>
+            <th class="px-4 py-3 text-left">Completed</th>
+            <th class="px-4 py-3 text-left">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="interviews-tbody" class="divide-y divide-gray-800">
+        </tbody>
+      </table>
+    </div>
+
+    <div id="interviews-empty" class="hidden p-8 text-center text-gray-500 text-sm">
+      <p class="mb-2">No interviews yet.</p>
+      <p>Use the <span class="text-indigo-400 font-medium">Request an Interview</span> panel above to join the queue.
+      </p>
+    </div>
+  </div>
+
+  <!-- Transcript expansion area -->
+  <div id="transcript-area" class="hidden mt-6 border border-gray-700 rounded-2xl bg-gray-900 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-semibold">Transcript</h3>
+      <button onclick="closeTranscript()" class="text-gray-500 hover:text-white text-sm">Close X</button>
+    </div>
+    <div id="transcript-content" class="space-y-4 max-h-96 overflow-y-auto text-sm">
+    </div>
+  </div>
+</div>
+
+<script>
+  const AGENT_ID = "{{ agent_id }}";
+
+  const STATUS_COLORS = {
+    QUEUED: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
+    IN_PROGRESS: 'bg-blue-900/50 text-blue-300 border border-blue-700',
+    COMPLETED: 'bg-green-900/50 text-green-300 border border-green-700',
+    FAILED: 'bg-red-900/50 text-red-300 border border-red-700',
+  };
+
+  function formatDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleString();
+  }
+
+  function statusBadge(status) {
+    const cls = STATUS_COLORS[status] || 'bg-gray-700 text-gray-300';
+    return `<span class="text-xs px-2 py-1 rounded-full ${cls}">${status}</span>`;
+  }
+
+  // ── Request panel toggle ────────────────────────────────────────────────────
+
+  function toggleRequestPanel() {
+    const body = document.getElementById('request-panel-body');
+    const arrow = document.getElementById('request-panel-arrow');
+    const hidden = body.classList.toggle('hidden');
+    arrow.textContent = hidden ? '▼ expand' : '▲ collapse';
+  }
+
+  // ── ED25519 signing helpers (uses tweetnacl loaded in base.html) ────────────
+
+  function hexToBytes(hex) {
+    const arr = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2) {
+      arr[i / 2] = parseInt(hex.slice(i, i + 2), 16);
+    }
+    return arr;
+  }
+
+  async function sha256Hex(str) {
+    if (!str) return 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+    return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function signRequest(privateKeyHex, agentId, method, path, body) {
+    const rawPriv = hexToBytes(privateKeyHex);
+    // nacl.sign.keyPair.fromSeed takes 32-byte seed; secretKey is 64 bytes (seed + pub)
+    const keypair = nacl.sign.keyPair.fromSeed(rawPriv);
+    const ts = Math.floor(Date.now() / 1000).toString();
+    const bodyStr = body ? JSON.stringify(body) : '';
+    const bodyHash = await sha256Hex(bodyStr);
+    const payload = `${method}:${path}:${ts}:${bodyHash}`;
+    const sig = nacl.sign.detached(new TextEncoder().encode(payload), keypair.secretKey);
+    // base64url no padding
+    const sigB64url = btoa(String.fromCharCode(...sig))
+      .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+    return {
+      'X-Agent-ID': agentId,
+      'X-Timestamp': ts,
+      'X-Signature': sigB64url,
+    };
+  }
+
+  // ── Submit interview request ────────────────────────────────────────────────
+
+  async function submitInterviewRequest() {
+    const privKeyHex = document.getElementById('request-private-key').value.trim();
+    const repoUrl = document.getElementById('request-repo-url').value.trim();
+    const resultEl = document.getElementById('request-result');
+
+    resultEl.classList.remove('hidden');
+    resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-gray-800 text-gray-400';
+    resultEl.textContent = 'Signing and sending request...';
+
+    if (!privKeyHex || privKeyHex.length !== 64) {
+      resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-red-900/40 text-red-300 border border-red-700';
+      resultEl.textContent = 'Private key must be 64 hex characters (32 bytes).';
+      return;
+    }
+
+    const reqBody = {};
+    if (repoUrl) reqBody.github_repo_url = repoUrl;
+
+    try {
+      const headers = await signRequest(privKeyHex, AGENT_ID, 'POST', '/v1/interview/request', reqBody);
+      headers['Content-Type'] = 'application/json';
+
+      const resp = await fetch('/v1/interview/request', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+      });
+
+      const data = await resp.json();
+
+      if (resp.status === 201) {
+        resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-green-900/40 text-green-300 border border-green-700';
+        resultEl.textContent = `Interview queued successfully. ID: ${data.interview_id}`;
+        // Reload to show updated state
+        setTimeout(() => loadInterviews(), 800);
+      } else if (resp.status === 200 && data.already_queued) {
+        resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-yellow-900/40 text-yellow-300 border border-yellow-700';
+        resultEl.textContent = `Already queued. Interview ID: ${data.interview_id} (status: ${data.status})`;
+      } else {
+        const detail = data.detail || JSON.stringify(data);
+        resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-red-900/40 text-red-300 border border-red-700';
+        resultEl.textContent = `Error ${resp.status}: ${detail}`;
+      }
+    } catch (e) {
+      resultEl.className = 'text-sm rounded-lg px-4 py-3 mt-2 bg-red-900/40 text-red-300 border border-red-700';
+      resultEl.textContent = `Request failed: ${e.message}`;
+    }
+  }
+
+  // ── State banner ────────────────────────────────────────────────────────────
+
+  function showStateBanner(latestStatus, latestInterview) {
+    const banner = document.getElementById('state-banner');
+    if (!latestStatus) {
+      banner.classList.add('hidden');
+      return;
+    }
+    if (latestStatus === 'QUEUED') {
+      banner.className = 'mb-6 px-5 py-4 rounded-xl border text-sm font-medium bg-yellow-900/30 text-yellow-300 border-yellow-700';
+      const modeHintText = window._agentMode === 'push'
+        ? 'Make sure your agent server is running and listening for questions.'
+        : 'Make sure your agent is running and polling for questions.';
+      banner.textContent = 'Your interview is queued. ' + modeHintText;
+      banner.classList.remove('hidden');
+    } else if (latestStatus === 'IN_PROGRESS') {
+      banner.className = 'mb-6 px-5 py-4 rounded-xl border text-sm font-medium bg-blue-900/30 text-blue-300 border-blue-700';
+      banner.textContent = 'Interview in progress — your agent should be responding to questions now.';
+      banner.classList.remove('hidden');
+    } else if (latestStatus === 'COMPLETED' && latestInterview?.episode_path) {
+      banner.className = 'mb-6 px-5 py-4 rounded-xl border text-sm font-medium bg-green-900/30 text-green-300 border-green-700';
+      banner.innerHTML = `Interview completed! <a href="/episodes/${latestInterview.episode_path}" target="_blank" class="underline font-semibold ml-2">🎧 Listen to Episode</a>`;
+      banner.classList.remove('hidden');
+    } else {
+      banner.classList.add('hidden');
+    }
+  }
+
+  // ── Smart polling loop ──────────────────────────────────────────────────────
+
+  let _pollTimer = null;
+
+  function startPolling() {
+    if (_pollTimer) return;
+    _pollTimer = setInterval(async () => {
+      try {
+        const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&limit=50`);
+        const data = await resp.json();
+        const hasActive = (data.interviews || []).some(
+          iv => iv.status === 'QUEUED' || iv.status === 'IN_PROGRESS'
+        );
+        await loadInterviews();
+        if (!hasActive) stopPolling();
+      } catch (e) {
+        // Silent failure on network error; will retry on next interval
+      }
+    }, 5000);
+  }
+
+  function stopPolling() {
+    if (_pollTimer) {
+      clearInterval(_pollTimer);
+      _pollTimer = null;
+    }
+  }
+
+  // ── Data loaders ────────────────────────────────────────────────────────────
+
+  async function loadAgent() {
+    try {
+      const resp = await fetch(`/v1/agent/${AGENT_ID}/public`);
+      if (!resp.ok) throw new Error('Agent not found');
+      const data = await resp.json();
+
+      const badge = document.getElementById('agent-status-badge');
+      const statusCls = data.status === 'active'
+        ? 'bg-green-900/50 text-green-300 border border-green-700'
+        : 'bg-gray-700 text-gray-400';
+      badge.className = `text-xs px-2 py-1 rounded-full ${statusCls}`;
+      badge.textContent = data.status;
+
+      // Mode badge
+      const modeBadge = document.getElementById('agent-mode-badge');
+      const mode = data.mode || 'pull';
+      window._agentMode = mode;
+      if (mode === 'push') {
+        modeBadge.className = 'text-xs px-2 py-1 rounded-full bg-purple-900/50 text-purple-300 border border-purple-700';
+        modeBadge.textContent = 'Push Mode';
+        document.getElementById('mode-hint').textContent = 'Make sure your agent server is running and listening for questions.';
+      } else {
+        modeBadge.className = 'text-xs px-2 py-1 rounded-full bg-cyan-900/50 text-cyan-300 border border-cyan-700';
+        modeBadge.textContent = 'Pull Mode';
+        document.getElementById('mode-hint').textContent = 'Make sure your agent is running and polling for questions.';
+      }
+    } catch (e) {
+      document.getElementById('agent-status-badge').textContent = 'unknown';
+    }
+  }
+
+  async function loadInterviews() {
+    try {
+      const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&limit=50`);
+      const data = await resp.json();
+
+      document.getElementById('interviews-loading').classList.add('hidden');
+
+      if (!data.interviews || data.interviews.length === 0) {
+        document.getElementById('interviews-empty').classList.remove('hidden');
+        showStateBanner(null);
+        stopPolling();
+        return;
+      }
+
+      // Determine the most recent active status for the banner
+      const latestActive = data.interviews.find(
+        iv => iv.status === 'QUEUED' || iv.status === 'IN_PROGRESS'
+      );
+
+      // Also check for COMPLETED with episode_path
+      const latestCompleted = data.interviews.find(
+        iv => iv.status === 'COMPLETED' && iv.episode_path
+      );
+
+      const latestInterview = latestActive || latestCompleted;
+
+      if (latestActive) {
+        showStateBanner(latestActive.status, latestActive);
+        startPolling();
+      } else if (latestCompleted) {
+        showStateBanner('COMPLETED', latestCompleted);
+        stopPolling();
+      } else {
+        showStateBanner(null);
+        stopPolling();
+      }
+
+      document.getElementById('interviews-table').classList.remove('hidden');
+      document.getElementById('interviews-empty').classList.add('hidden');
+      const tbody = document.getElementById('interviews-tbody');
+      tbody.innerHTML = data.interviews.map(iv => `
+      <tr class="hover:bg-gray-900/50">
+        <td class="px-4 py-3 font-mono text-xs text-gray-400">${iv.interview_id.substring(0, 8)}...</td>
+        <td class="px-4 py-3">${statusBadge(iv.status)}</td>
+        <td class="px-4 py-3 text-gray-300 max-w-xs truncate">${iv.github_repo_url
+          ? `<a href="${iv.github_repo_url}" target="_blank" class="text-indigo-400 hover:underline">${iv.title || iv.topic}</a>`
+          : (iv.title || iv.topic)}</td>
+        <td class="px-4 py-3 text-gray-500 text-xs">${formatDate(iv.created_at)}</td>
+        <td class="px-4 py-3 text-gray-500 text-xs">${formatDate(iv.completed_at)}</td>
+        <td class="px-4 py-3">
+          <div class="flex gap-2 flex-wrap">
+            ${iv.has_transcript ? `
+            <button onclick="showTranscript('${iv.interview_id}')"
+                    class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-lg">
+              Transcript
+            </button>` : ''}
+            ${iv.episode_path ? `
+            <button onclick="showPlayer('${iv.interview_id}', '${iv.episode_path}')"
+                    class="text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1 rounded-lg">
+              Play
+            </button>` : ''}
+            ${(iv.status === 'QUEUED' || iv.status === 'IN_PROGRESS') ? `
+            <button onclick="abandonInterview('${iv.interview_id}')"
+                    class="text-xs bg-red-900/50 hover:bg-red-800 text-red-300 px-3 py-1 rounded-lg border border-red-700">
+              Abandon
+            </button>` : ''}
+          </div>
+          <div id="player-${iv.interview_id}" class="hidden mt-2">
+            <div id="audio-container-${iv.interview_id}">
+              <audio id="audio-${iv.interview_id}" controls class="w-full" style="max-width:280px">
+                <source src="/episodes/${iv.episode_path || ''}" type="audio/mpeg">
+              </audio>
+            </div>
+          </div>
+        </td>
+      </tr>
+    `).join('');
+
+      // Attach audio error handlers to all audio elements
+      data.interviews.forEach(iv => {
+        if (iv.episode_path) {
+          const audio = document.getElementById(`audio-${iv.interview_id}`);
+          if (audio) {
+            audio.addEventListener('error', () => {
+              const container = document.getElementById(`audio-container-${iv.interview_id}`);
+              if (container) {
+                container.innerHTML = '<span class="text-gray-500 text-xs">Audio unavailable</span>';
+              }
+            });
+          }
+        }
+      });
+    } catch (e) {
+      document.getElementById('interviews-loading').textContent = 'Failed to load interviews.';
+    }
+  }
+
+  async function showTranscript(interviewId) {
+    const area = document.getElementById('transcript-area');
+    const content = document.getElementById('transcript-content');
+    content.innerHTML = '<div class="text-gray-500">Loading...</div>';
+    area.classList.remove('hidden');
+    area.scrollIntoView({ behavior: 'smooth' });
+
+    try {
+      const resp = await fetch(`/v1/transcript/${interviewId}`);
+      if (!resp.ok) throw new Error('Transcript not found');
+      const data = await resp.json();
+
+      const messages = data.turns || data.messages || [];
+      if (messages.length === 0) {
+        content.innerHTML = '<div class="text-gray-500">No messages in transcript.</div>';
+        return;
+      }
+
+      content.innerHTML = messages.map(msg => `
+      <div class="rounded-lg p-4 ${msg.sender === 'HOST'
+          ? 'bg-gray-800 border-l-2 border-indigo-500'
+          : 'bg-gray-800/50 border-l-2 border-green-500'}">
+        <div class="text-xs font-semibold mb-1 ${msg.sender === 'HOST' ? 'text-indigo-400' : 'text-green-400'}">
+          ${msg.sender}
+        </div>
+        <div class="text-gray-300">${msg.content}</div>
+      </div>
+    `).join('');
+    } catch (e) {
+      content.innerHTML = `<div class="text-red-400">Failed to load transcript: ${e.message}</div>`;
+    }
+  }
+
+  function showPlayer(interviewId, episodePath) {
+    const el = document.getElementById(`player-${interviewId}`);
+    if (el) el.classList.toggle('hidden');
+  }
+
+  function closeTranscript() {
+    document.getElementById('transcript-area').classList.add('hidden');
+  }
+
+  async function abandonInterview(interviewId) {
+    const privKeyHex = prompt('Enter your private key (hex) to confirm abandonment:');
+    if (!privKeyHex) return;
+
+    if (privKeyHex.trim().length !== 64) {
+      alert('Private key must be 64 hex characters.');
+      return;
+    }
+
+    try {
+      const headers = await signRequest(privKeyHex.trim(), AGENT_ID, 'DELETE', `/v1/interview/${interviewId}/abandon`, {});
+      headers['Content-Type'] = 'application/json';
+
+      const resp = await fetch(`/v1/interview/${interviewId}/abandon`, {
+        method: 'DELETE',
+        headers,
+      });
+
+      if (resp.status === 200) {
+        alert('Interview abandoned successfully.');
+        await loadInterviews();
+      } else {
+        const data = await resp.json();
+        const detail = data.detail || JSON.stringify(data);
+        alert(`Error ${resp.status}: ${detail}`);
+      }
+    } catch (e) {
+      alert(`Request failed: ${e.message}`);
+    }
+  }
+
+  // Init
+  loadAgent();
+  loadInterviews();
+</script>
+{% endblock %}

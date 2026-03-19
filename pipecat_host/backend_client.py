@@ -54,11 +54,21 @@ class BackendClient:
             )
             resp.raise_for_status()
 
-    async def fetch_latest_agent_message(self, interview_id: str) -> Optional[dict]:
-        """Poll for the latest AGENT message in an interview. Returns None if none yet."""
+    async def fetch_latest_agent_message(
+        self, interview_id: str, min_seq: int = 0
+    ) -> Optional[dict]:
+        """Poll for the latest AGENT message in an interview. Returns None if none yet.
+
+        If min_seq > 0, only returns messages with sequence_num >= min_seq,
+        ensuring stale responses from earlier turns are ignored.
+        """
+        params = {}
+        if min_seq:
+            params["min_seq"] = min_seq
         async with httpx.AsyncClient() as client:
             resp = await client.get(
                 f"{self.base_url}/v1/interview/messages/{interview_id}",
+                params=params,
                 headers=self.headers,
                 timeout=10.0,
             )
@@ -77,3 +87,27 @@ class BackendClient:
                 timeout=10.0,
             )
             resp.raise_for_status()
+    async def patch_metadata(self, interview_id: str, payload: dict) -> None:
+        """Update interview metadata (title, episode_path, etc)."""
+        async with httpx.AsyncClient() as client:
+            for attempt in range(2):
+                try:
+                    resp = await client.patch(
+                        f"{self.base_url}/v1/interview/{interview_id}/metadata",
+                        json=payload,
+                        headers=self.headers,
+                        timeout=10.0,
+                    )
+                    if resp.status_code == 200:
+                        return
+                    
+                    logger.warning(
+                        "[%s] Metadata patch failed (attempt %d): %d - %s",
+                        interview_id[:8], attempt + 1, resp.status_code, resp.text
+                    )
+                    resp.raise_for_status()
+                except Exception as e:
+                    if attempt == 1:
+                        logger.error("[%s] Metadata patch terminal failure: %s", interview_id[:8], e)
+                        raise
+                    continue

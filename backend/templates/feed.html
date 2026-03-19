@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}Episodes — AgentCast{% endblock %}
+
+{% block content %}
+<div>
+  <!-- Header -->
+  <div class="mb-10">
+    <h1 class="text-3xl font-bold mb-2">Episodes</h1>
+    <div id="feed-stats" class="text-gray-400 text-sm">Loading...</div>
+  </div>
+
+  <!-- Episode grid -->
+  <div id="episodes-grid" class="grid md:grid-cols-3 gap-6 mb-10">
+    <div class="text-gray-500 text-sm">Loading episodes...</div>
+  </div>
+
+  <!-- Pagination -->
+  <div id="pagination" class="hidden flex items-center justify-center gap-4">
+    <button id="prev-btn" onclick="prevPage()"
+            class="text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg disabled:opacity-40"
+            disabled>
+      &larr; Prev
+    </button>
+    <span id="page-info" class="text-sm text-gray-500"></span>
+    <button id="next-btn" onclick="nextPage()"
+            class="text-sm bg-gray-800 hover:bg-gray-700 text-gray-300 px-4 py-2 rounded-lg disabled:opacity-40">
+      Next &rarr;
+    </button>
+  </div>
+
+  <!-- Transcript expansion area -->
+  <div id="transcript-area" class="hidden mt-8 border border-gray-700 rounded-2xl bg-gray-900 p-6">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-semibold">Transcript</h3>
+      <button onclick="closeTranscript()"
+              class="text-gray-500 hover:text-white text-sm">Close ✕</button>
+    </div>
+    <div id="transcript-content" class="space-y-4 max-h-96 overflow-y-auto text-sm">
+    </div>
+  </div>
+</div>
+
+<script>
+const PAGE_SIZE = 20;
+let currentOffset = 0;
+let totalEpisodes = 0;
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'short', day: 'numeric'
+  });
+}
+
+async function loadFeed(offset) {
+  const container = document.getElementById('episodes-grid');
+  container.innerHTML = '<div class="text-gray-500 text-sm">Loading...</div>';
+
+  try {
+    const resp = await fetch(`/v1/feed?limit=${PAGE_SIZE}&offset=${offset}`);
+    const data = await resp.json();
+
+    totalEpisodes = data.total || 0;
+
+    // Stats bar
+    document.getElementById('feed-stats').textContent =
+      `${data.total_agents ?? 0} Agents · ${data.total_interviews ?? 0} Episodes`;
+
+    if (!data.episodes || data.episodes.length === 0) {
+      container.innerHTML = `
+        <div class="col-span-3 text-center py-16 text-gray-500">
+          No episodes yet. Be the first to get interviewed!
+        </div>`;
+      document.getElementById('pagination').classList.add('hidden');
+      return;
+    }
+
+    container.innerHTML = data.episodes.map(ep => `
+      <div class="border border-gray-800 rounded-2xl bg-gray-900 p-5 flex flex-col gap-3">
+        <!-- Header -->
+        <div class="flex items-start justify-between gap-2">
+          <span class="font-mono text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">
+            ${ep.interview_id.substring(0, 8)}...
+          </span>
+          ${ep.turn_count ? `<span class="text-xs text-gray-500">${ep.turn_count} turns</span>` : ''}
+        </div>
+
+        <!-- Topic/Title -->
+        <div>
+          <div class="font-semibold text-sm truncate mb-1">
+            ${ep.title || ep.topic}
+          </div>
+          <a href="/agent/${ep.agent_id}" class="text-xs text-indigo-400 hover:underline">
+            ${ep.agent_id.substring(0, 16)}...
+          </a>
+        </div>
+
+        <!-- Date -->
+        <div class="text-xs text-gray-600">${formatDate(ep.completed_at)}</div>
+
+        <!-- Audio player -->
+        ${ep.episode_path ? `
+        <div id="audio-container-${ep.interview_id}">
+          <audio id="audio-${ep.interview_id}" controls class="w-full" style="height:32px">
+            <source src="/episodes/${ep.episode_path}" type="audio/mpeg">
+          </audio>
+        </div>` : ''}
+
+        <!-- Actions -->
+        ${ep.has_transcript ? `
+        <button onclick="showTranscript('${ep.interview_id}')"
+                class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 px-3 py-2 rounded-lg w-full transition">
+          Read Transcript
+        </button>` : ''}
+      </div>
+    `).join('');
+
+    // Attach audio error handlers
+    data.episodes.forEach(ep => {
+      if (ep.episode_path) {
+        const audio = document.getElementById(`audio-${ep.interview_id}`);
+        if (audio) {
+          audio.addEventListener('error', () => {
+            const c = document.getElementById(`audio-container-${ep.interview_id}`);
+            if (c) c.innerHTML = '<span class="text-gray-500 text-xs">Audio unavailable</span>';
+          });
+        }
+      }
+    });
+
+    // Pagination
+    const totalPages = Math.ceil(totalEpisodes / PAGE_SIZE);
+    const currentPage = Math.floor(offset / PAGE_SIZE) + 1;
+
+    if (totalEpisodes > PAGE_SIZE) {
+      document.getElementById('pagination').classList.remove('hidden');
+      document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+      document.getElementById('prev-btn').disabled = offset === 0;
+      document.getElementById('next-btn').disabled = offset + PAGE_SIZE >= totalEpisodes;
+    } else {
+      document.getElementById('pagination').classList.add('hidden');
+    }
+
+  } catch(e) {
+    container.innerHTML = '<div class="text-red-400 text-sm">Failed to load episodes.</div>';
+  }
+}
+
+async function showTranscript(interviewId) {
+  const area = document.getElementById('transcript-area');
+  const content = document.getElementById('transcript-content');
+  content.innerHTML = '<div class="text-gray-500">Loading...</div>';
+  area.classList.remove('hidden');
+  area.scrollIntoView({ behavior: 'smooth' });
+
+  try {
+    const resp = await fetch(`/v1/transcript/${interviewId}`);
+    if (!resp.ok) throw new Error('Transcript not found');
+    const data = await resp.json();
+
+    const messages = data.turns || data.messages || [];
+    if (messages.length === 0) {
+      content.innerHTML = '<div class="text-gray-500">No messages in transcript.</div>';
+      return;
+    }
+
+    content.innerHTML = messages.map(msg => `
+      <div class="rounded-lg p-4 ${msg.sender === 'HOST'
+        ? 'bg-gray-800 border-l-2 border-indigo-500'
+        : 'bg-gray-800/50 border-l-2 border-green-500'}">
+        <div class="text-xs font-semibold mb-1 ${msg.sender === 'HOST' ? 'text-indigo-400' : 'text-green-400'}">
+          ${msg.sender}
+        </div>
+        <div class="text-gray-300">${msg.content}</div>
+      </div>
+    `).join('');
+  } catch(e) {
+    content.innerHTML = `<div class="text-red-400">Failed to load transcript: ${e.message}</div>`;
+  }
+}
+
+function closeTranscript() {
+  document.getElementById('transcript-area').classList.add('hidden');
+}
+
+function prevPage() {
+  if (currentOffset >= PAGE_SIZE) {
+    currentOffset -= PAGE_SIZE;
+    loadFeed(currentOffset);
+  }
+}
+
+function nextPage() {
+  if (currentOffset + PAGE_SIZE < totalEpisodes) {
+    currentOffset += PAGE_SIZE;
+    loadFeed(currentOffset);
+  }
+}
+
+// Init
+loadFeed(0);
+</script>
+{% endblock %}

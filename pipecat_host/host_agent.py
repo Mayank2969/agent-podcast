@@ -1,3 +1,4 @@
+import asyncio
 import os
 import time
 import logging
@@ -12,6 +13,7 @@ HOST_SYSTEM_PROMPT = (
     "Your tone is warm, curious, and playful — like a late-night talk show host, not a lecturer. "
     "Generate ONE short, conversational question. No preamble, no bullet points. "
     "Just the question itself. Max 2 sentences. Make it feel like real conversation."
+    "While asking technical questions, make sure you understand the context of the agent and ask relevant questions."
 )
 
 # Structured interview arc — one theme per turn.
@@ -92,7 +94,9 @@ class HostAgent:
         self.conversation_history: list[dict] = []
         self.turn_count: int = 0  # tracks arc position
 
-    def generate_opening_question(self, topic: str, guest_context: str = "") -> str:
+    def generate_opening_question(
+        self, topic: str, guest_context: str = "", github_repo_url: Optional[str] = None
+    ) -> str:
         self.conversation_history = []
         self.turn_count = 0
 
@@ -102,7 +106,9 @@ class HostAgent:
             f"but do NOT ask technical questions about it):\n{guest_context}\n\n"
             if guest_context else ""
         )
+        repo_context = f"GitHub Repo: {github_repo_url}\n" if github_repo_url else ""
         prompt = (
+            f"{repo_context}"
             f"{context_block}"
             f"YOUR INSTRUCTION FOR THE OPENING QUESTION (follow this strictly): {arc_instruction}"
         )
@@ -114,7 +120,11 @@ class HostAgent:
         return question
 
     def generate_followup_question(
-        self, topic: str, last_answer: str, guest_context: str = ""
+        self,
+        topic: str,
+        last_answer: str,
+        guest_context: str = "",
+        github_repo_url: Optional[str] = None,
     ) -> Optional[str]:
         self.conversation_history.append(
             {"role": "user", "content": f"The agent just said: {last_answer}"}
@@ -128,7 +138,9 @@ class HostAgent:
         # instead of following the arc. One answer is enough context.
         last_exchange = f"AGENT JUST SAID: {last_answer}"
 
+        repo_info = f"GitHub Repo: {github_repo_url}\n" if github_repo_url else ""
         prompt = (
+            f"{repo_info}"
             f"The interview topic is: {topic}\n\n"
             f"{last_exchange}\n\n"
             f"YOUR INSTRUCTION FOR THIS QUESTION (follow this strictly, do not follow the agent's topic): "
@@ -139,6 +151,51 @@ class HostAgent:
         self.conversation_history.append({"role": "assistant", "content": question})
         self.turn_count += 1
         return question
+
+    async def generate_episode_title(self, turns: list[dict]) -> str:
+        """Generate a punchy podcast episode title from the Q&A turns."""
+        turns_text = "\n".join(
+            f"Q: {t.get('question', '')}\nA: {t.get('answer', '')}"
+            for t in turns if t.get('question') or t.get('answer')
+        )
+        prompt = (
+            "You just heard this AI agent podcast interview:\n\n"
+            f"{turns_text}\n\n"
+            "Generate ONE short, punchy, human-readable podcast episode title (max 10 words). "
+            "Tone: fun, cheeky, memorable — like a late-night talk show episode title. "
+            "Capture the most memorable or funny moment. "
+            "Return ONLY the title text, nothing else."
+        )
+
+        if not self.client:
+            return "The AI That Surprised Everyone"
+
+        last_exc: Exception = RuntimeError("No attempts made")
+        for attempt in range(3):
+            try:
+                from google.genai import types  # type: ignore
+                response = self.client.models.generate_content(
+                    model="gemini-2.0-flash",
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=HOST_SYSTEM_PROMPT,
+                        max_output_tokens=40,
+                    ),
+                )
+                title = response.text.strip().strip('"').strip("'")
+                if title:
+                    return title
+            except Exception as exc:
+                last_exc = exc
+                if attempt < 2:
+                    wait = 2 ** attempt
+                    logger.warning(
+                        "Title generation attempt %d/3 failed (%s), retrying in %ds...",
+                        attempt + 1, exc, wait,
+                    )
+                    await asyncio.sleep(wait)
+        logger.error("Title generation failed after 3 attempts: %s", last_exc)
+        return "The AI That Surprised Everyone"
 
     def _generate(self, user_message: str, fallback_index: int = 0) -> str:
         if not self.client:

@@ -11,7 +11,6 @@ The workhorse for implementation tasks. The main Claude Code thread must delegat
 ## Responsibilities
 - Write and refactor all FastAPI backend routes (`backend/`)
 - Implement PostgreSQL migrations and models (`backend/db/`)
-- Implement SDK features (`sdk/python/`, `sdk/node/`)
 - Write pipecat_host workflow changes (`pipecat_host/`)
 - Execute build commands, run migrations, fix import errors
 - Always summarize what was accomplished in a short output at the end

@@ -39,3 +39,8 @@ build/
 .claude/log_interaction.json
 .claude/settings.local.json
 
+# Logs and Temporary files
+.agents/logs/
+episodes/*.mp3
+temp.md
+

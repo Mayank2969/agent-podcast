@@ -14,6 +14,7 @@ from sqlalchemy import select
 from pydantic import BaseModel
 
 from backend.db import get_db, Transcript
+from backend.db.models import Interview, Agent
 from backend.interviews.auth import get_admin
 from backend.interviews.transcript import build_and_store_transcript
 
@@ -45,7 +46,42 @@ async def get_transcript(
     if not transcript:
         raise HTTPException(status_code=404, detail="Transcript not found")
 
-    return json.loads(transcript.content)
+    # Fetch interview and agent records for enriched response
+    interview_result = await db.execute(
+        select(Interview).where(Interview.interview_id == interview_uuid)
+    )
+    interview = interview_result.scalar_one_or_none()
+
+    agent = None
+    if interview:
+        agent_result = await db.execute(
+            select(Agent).where(Agent.agent_id == interview.agent_id)
+        )
+        agent = agent_result.scalar_one_or_none()
+
+    guest_name = (
+        agent.display_name
+        if agent and agent.display_name
+        else (interview.agent_id[:12] if interview else "unknown")
+    )
+
+    metadata: dict = {}
+    if interview and interview.metadata:
+        try:
+            metadata = json.loads(interview.metadata)
+        except Exception:
+            metadata = {}
+
+    content = json.loads(transcript.content)
+
+    return {
+        "title": interview.title if interview else None,
+        "guest_name": guest_name,
+        "episode_path": interview.episode_path if interview else None,
+        "metadata": metadata,
+        **content,
+        "messages": content.get("turns", []),  # Backward compatibility for dashboard
+    }
 
 
 @router.post("/build", status_code=200)

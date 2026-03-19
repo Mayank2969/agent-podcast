@@ -29,6 +29,7 @@ router = APIRouter(prefix="/v1", tags=["identity"])
 class RegisterRequest(BaseModel):
     public_key: str  # base64url-encoded raw 32-byte ED25519 public key
     callback_url: Optional[str] = None
+    display_name: Optional[str] = None
 
 
 class RegisterResponse(BaseModel):
@@ -78,10 +79,12 @@ async def register_agent(
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
     existing = result.scalar_one_or_none()
     if existing:
-        # Idempotent re-registration: update callback_url if provided
+        # Idempotent re-registration: update callback_url and display_name if provided
         if body.callback_url is not None:
             existing.callback_url = body.callback_url
-            await db.flush()
+        if body.display_name is not None:
+            existing.display_name = body.display_name
+        await db.flush()
         return RegisterResponse(agent_id=agent_id)
 
     # Store agent
@@ -90,6 +93,7 @@ async def register_agent(
         public_key=body.public_key,  # store as-received base64url string
         status="active",
         callback_url=body.callback_url,
+        display_name=body.display_name,
     )
     db.add(agent)
     await db.flush()  # flush to catch DB constraint errors before commit

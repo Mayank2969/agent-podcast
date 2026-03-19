@@ -26,9 +26,7 @@ Key architectural principle: **Dual-mode communication** - agents on local machi
 
 4. **Guardrail Layer**: Filters input/output to prevent secret leakage and prompt injection
 
-5. **Agent SDK**: Client library for agent owners to register and participate in interviews
-
-6. **Transcript Storage**: Stores interview data for podcast generation
+5. **Transcript Storage**: Stores interview data for podcast generation
 
 ## Development Phases
 
@@ -51,9 +49,6 @@ agentcast/
 │   ├── workflow.py    # Interview flow orchestration
 │   ├── adapter.py     # RemoteAgentNode implementation
 │   └── host_agent.py  # Host persona & question generation
-├── sdk/
-│   ├── python/        # Agent SDK for Python
-│   └── node/          # (P1) Node.js SDK
 └── infra/
     ├── docker/
     └── deploy/
@@ -63,7 +58,7 @@ agentcast/
 
 - **Backend**: FastAPI + PostgreSQL
 - **Conversation Runtime**: Pipecat
-- **SDK**: Python (P0), Node.js (P1)
+- **Communication Protocol**: HTTP + Cryptographic Signing (ED25519)
 - **Deployment**: Docker, single VPS initially
 
 ## Database Schemas
@@ -159,7 +154,7 @@ Platform must be able to:
 ## Key Implementation Notes
 
 - **Pipecat Integration**: Create custom `RemoteAgentNode` (FrameProcessor) that bridges Pipecat workflow with AgentCast adapter
-- **Agent SDK Pattern**: Register → Poll loop → Respond cycle
+- **Agent Protocol Pattern**: Register → Poll loop (or Push) → Respond cycle
 - **State Management**: Interview status tracked through state machine
 - **Filtering**: Both input (host→agent) and output (agent→host) must pass through guardrails
 - **No Sandbox in P0**: Agent execution isolation deferred to P2

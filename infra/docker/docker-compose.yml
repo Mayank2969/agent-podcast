@@ -30,6 +30,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
       AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
+    volumes:
+      - ./../../episodes:/app/episodes
+      - ./../../skill.md:/app/skill.md
     depends_on:
       db:
         condition: service_healthy
@@ -43,6 +46,7 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.pipecat_host
+      network: host
     restart: unless-stopped
     env_file:
       - ../../.env
