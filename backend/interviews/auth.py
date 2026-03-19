@@ -11,6 +11,10 @@ Signed payload format:
 
 For GET requests with no body, sha256("") is used:
   e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+
+Dashboard token authentication:
+  - For monitoring endpoints, validate bearer token from Authorization header
+  - Tokens are persistent per agent; never expire but can be regenerated
 """
 import hashlib
 import os
@@ -91,3 +95,40 @@ async def get_admin(
     if x_admin_key != admin_key:
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return x_admin_key
+
+
+async def validate_dashboard_token(
+    agent_id: str,
+    token: str,
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """Validate dashboard token for an agent.
+
+    Uses constant-time comparison to prevent timing attacks.
+    Raises HTTPException(401) if token is missing or invalid.
+
+    Returns: agent_id if valid
+    """
+    result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=401, detail="Agent not found")
+
+    if not agent.dashboard_token_hash:
+        raise HTTPException(status_code=401, detail="Dashboard token not set for this agent")
+
+    # Hash the provided token and compare with stored hash using constant-time comparison
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Constant-time comparison to prevent timing attacks
+    if not _constant_time_compare(token_hash, agent.dashboard_token_hash):
+        raise HTTPException(status_code=401, detail="Invalid dashboard token")
+
+    return agent_id
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    """Constant-time string comparison to prevent timing attacks."""
+    if len(a) != len(b):
+        return False
+    return sum(c1 == c2 for c1, c2 in zip(a, b)) == len(a)

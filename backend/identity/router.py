@@ -5,11 +5,13 @@ POST /v1/register
 - No authentication required (bootstrap endpoint)
 - Accepts base64url-encoded ED25519 public key
 - Computes agent_id = SHA256(raw_public_key_bytes).hexdigest()
-- Stores agent in DB
-- Returns agent_id
+- Generates dashboard_token (32-byte random, returned only once)
+- Stores token hash in DB
+- Returns agent_id and dashboard_token
 """
 import hashlib
-from base64 import urlsafe_b64decode
+import secrets
+from base64 import urlsafe_b64decode, b64encode
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidKey
@@ -34,6 +36,7 @@ class RegisterRequest(BaseModel):
 
 class RegisterResponse(BaseModel):
     agent_id: str
+    dashboard_token: str  # Returned only once at registration
 
 
 class AgentResponse(BaseModel):
@@ -47,6 +50,18 @@ def _add_padding(b64: str) -> str:
     return b64 + "=" * ((4 - len(b64) % 4) % 4)
 
 
+def _generate_dashboard_token() -> tuple[str, str]:
+    """Generate a dashboard token and return (unhashed_token, sha256_hash).
+
+    Returns:
+        (unhashed_token_base64, hashed_token_hex) - return unhashed to agent, store hashed
+    """
+    raw_token = secrets.token_bytes(32)  # 256 bits
+    token_base64 = b64encode(raw_token).decode('ascii')
+    token_hash = hashlib.sha256(raw_token).hexdigest()
+    return token_base64, token_hash
+
+
 @router.post("/register", response_model=RegisterResponse, status_code=200)
 async def register_agent(
     body: RegisterRequest,
@@ -55,7 +70,11 @@ async def register_agent(
     """Register an anonymous agent using its ED25519 public key.
 
     The agent_id is derived deterministically: SHA256(raw_public_key_bytes).
+    A unique dashboard_token is generated for authentication.
     No personal information is stored.
+
+    The dashboard_token is returned ONLY at registration and never again.
+    It must be saved by the agent immediately.
     """
     # Decode base64url -> raw bytes
     try:
@@ -85,7 +104,15 @@ async def register_agent(
         if body.display_name is not None:
             existing.display_name = body.display_name
         await db.flush()
-        return RegisterResponse(agent_id=agent_id)
+
+        # For re-registration, generate a new token (allows regeneration via SDK)
+        token_plain, token_hash = _generate_dashboard_token()
+        existing.dashboard_token_hash = token_hash
+        await db.flush()
+        return RegisterResponse(agent_id=agent_id, dashboard_token=token_plain)
+
+    # Generate dashboard token
+    token_plain, token_hash = _generate_dashboard_token()
 
     # Store agent
     agent = Agent(
@@ -94,11 +121,12 @@ async def register_agent(
         status="active",
         callback_url=body.callback_url,
         display_name=body.display_name,
+        dashboard_token_hash=token_hash,
     )
     db.add(agent)
     await db.flush()  # flush to catch DB constraint errors before commit
 
-    return RegisterResponse(agent_id=agent_id)
+    return RegisterResponse(agent_id=agent_id, dashboard_token=token_plain)
 
 
 @router.get("/agent/{agent_id}", response_model=AgentResponse)

@@ -98,6 +98,24 @@
 <script>
   const AGENT_ID = "{{ agent_id }}";
 
+  // Extract dashboard token from URL query params
+  const _params = new URLSearchParams(window.location.search);
+  const DASHBOARD_TOKEN = _params.get('token');
+
+  if (!DASHBOARD_TOKEN) {
+    document.getElementById('dashboard-root').innerHTML = `
+      <div class="p-8 text-center">
+        <div class="text-red-400 text-lg font-semibold mb-2">Missing Dashboard Token</div>
+        <p class="text-gray-400 mb-4">
+          Your dashboard token was not found in the URL. Did you copy the full link when registering?
+        </p>
+        <p class="text-gray-500 text-sm">
+          The token should appear as: <code class="bg-gray-900 px-2 py-1 rounded">?token=...</code>
+        </p>
+      </div>
+    `;
+  }
+
   const STATUS_COLORS = {
     QUEUED: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
     IN_PROGRESS: 'bg-blue-900/50 text-blue-300 border border-blue-700',
@@ -154,7 +172,7 @@
     if (_pollTimer) return;
     _pollTimer = setInterval(async () => {
       try {
-        const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&limit=50`);
+        const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&token=${DASHBOARD_TOKEN}&limit=50`);
         const data = await resp.json();
         const hasActive = (data.interviews || []).some(
           iv => iv.status === 'QUEUED' || iv.status === 'IN_PROGRESS'
@@ -178,7 +196,7 @@
 
   async function loadAgent() {
     try {
-      const resp = await fetch(`/v1/agent/${AGENT_ID}/public`);
+      const resp = await fetch(`/v1/agent/${AGENT_ID}/public?token=${DASHBOARD_TOKEN}`);
       if (!resp.ok) throw new Error('Agent not found');
       const data = await resp.json();
 
@@ -209,7 +227,7 @@
 
   async function loadInterviews() {
     try {
-      const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&limit=50`);
+      const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&token=${DASHBOARD_TOKEN}&limit=50`);
       const data = await resp.json();
 
       document.getElementById('interviews-loading').classList.add('hidden');
@@ -307,7 +325,7 @@
     area.scrollIntoView({ behavior: 'smooth' });
 
     try {
-      const resp = await fetch(`/v1/transcript/${interviewId}`);
+      const resp = await fetch(`/v1/transcript/${interviewId}?token=${DASHBOARD_TOKEN}`);
       if (!resp.ok) throw new Error('Transcript not found');
       const data = await resp.json();
 

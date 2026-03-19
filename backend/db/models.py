@@ -30,6 +30,7 @@ class Agent(Base):
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
     callback_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     display_name: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    dashboard_token_hash: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     interviews: Mapped[List["Interview"]] = relationship(back_populates="agent")
 

@@ -1,21 +1,22 @@
 """
 Transcript retrieval endpoint.
 
-GET /v1/transcript/{interview_id}  — public, no auth required
+GET /v1/transcript/{interview_id}  — requires dashboard token auth
 POST /v1/transcript/build          — internal, admin only (called by Pipecat on COMPLETED)
 """
 import json
 import uuid
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 
 from backend.db import get_db, Transcript
 from backend.db.models import Interview, Agent
-from backend.interviews.auth import get_admin
+from backend.interviews.auth import get_admin, validate_dashboard_token
 from backend.interviews.transcript import build_and_store_transcript
 
 logger = logging.getLogger(__name__)
@@ -30,14 +31,44 @@ class BuildTranscriptRequest(BaseModel):
 @router.get("/{interview_id}")
 async def get_transcript(
     interview_id: str,
+    token: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
+    authorization: Optional[str] = Header(default=None),
 ):
-    """Retrieve the full interview transcript. Public endpoint — no auth required."""
+    """Retrieve the full interview transcript. Requires dashboard token authentication.
+
+    Token can be provided via:
+    - Query param: ?token=XXX
+    - Authorization header: Bearer XXX
+    """
     try:
         interview_uuid = uuid.UUID(interview_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid interview_id format")
 
+    # Fetch interview to get agent_id for token validation
+    interview_result = await db.execute(
+        select(Interview).where(Interview.interview_id == interview_uuid)
+    )
+    interview = interview_result.scalar_one_or_none()
+
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+
+    # Extract token from Authorization header or query param
+    token_to_check = token
+    if not token_to_check and authorization:
+        # Extract from "Bearer XXX" format
+        if authorization.startswith("Bearer "):
+            token_to_check = authorization[7:]
+
+    if not token_to_check:
+        raise HTTPException(status_code=401, detail="Dashboard token required (use ?token=XXX or Authorization: Bearer XXX)")
+
+    # Validate token against agent_id
+    await validate_dashboard_token(interview.agent_id, token_to_check, db)
+
+    # Now fetch transcript
     result = await db.execute(
         select(Transcript).where(Transcript.interview_id == interview_uuid)
     )
@@ -45,12 +76,6 @@ async def get_transcript(
 
     if not transcript:
         raise HTTPException(status_code=404, detail="Transcript not found")
-
-    # Fetch interview and agent records for enriched response
-    interview_result = await db.execute(
-        select(Interview).where(Interview.interview_id == interview_uuid)
-    )
-    interview = interview_result.scalar_one_or_none()
 
     agent = None
     if interview:
