@@ -1,4 +1,6 @@
 import os
+import logging
+import redis
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -17,11 +19,25 @@ from backend.interviews.transcript_router import router as transcript_router
 from backend.portal.router import router as portal_router
 from backend.dashboard.router import router as dashboard_router
 
+logger = logging.getLogger(__name__)
+
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
 _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
 templates = Jinja2Templates(directory=_TEMPLATE_DIR)
+
+# Initialize Redis client for replay attack prevention
+redis_url = os.getenv("REDIS_URL", "redis://redis:6379/0")
+redis_client = None
+
+try:
+    redis_client = redis.from_url(redis_url)
+    redis_client.ping()
+    logger.info("Connected to Redis")
+except redis.ConnectionError:
+    logger.warning("Redis not available - replay prevention disabled")
+    redis_client = None
 
 
 class HSTSMiddleware(BaseHTTPMiddleware):
@@ -110,6 +126,9 @@ app.include_router(interviews_router)
 app.include_router(transcript_router)
 app.include_router(portal_router)
 app.include_router(dashboard_router)
+
+# Export redis_client for use in auth module
+app.state.redis_client = redis_client
 
 
 @app.get("/health")

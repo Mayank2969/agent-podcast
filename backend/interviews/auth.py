@@ -15,12 +15,16 @@ For GET requests with no body, sha256("") is used:
 Dashboard token authentication:
   - For monitoring endpoints, validate bearer token from Authorization header
   - Tokens are persistent per agent; never expire but can be regenerated
+
+Includes nonce-based replay attack prevention using Redis.
 """
 import hashlib
+import logging
 import os
 import time
 from base64 import urlsafe_b64decode
 
+import redis
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 from fastapi import Header, HTTPException, Request, Depends
@@ -28,6 +32,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from backend.db import get_db, Agent
+
+logger = logging.getLogger(__name__)
 
 
 EMPTY_BODY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -55,6 +61,38 @@ def get_admin_key() -> str:
     return key
 
 
+def validate_and_store_nonce(signature: str, redis_client: redis.Redis) -> bool:
+    """
+    Validate request signature hasn't been seen before (replay attack prevention).
+
+    Args:
+        signature: Request signature from X-Signature header
+        redis_client: Redis connection
+
+    Returns:
+        True if signature is new and stored
+        False if signature was already used (replay attempt)
+    """
+    if not redis_client:
+        # Redis unavailable - allow request
+        logger.warning("Redis unavailable - replay prevention disabled")
+        return True
+
+    # Create nonce from signature hash
+    nonce = hashlib.sha256(signature.encode()).hexdigest()
+
+    # Check if nonce already exists (replay attempt)
+    nonce_key = f"nonce:{nonce}"
+    if redis_client.exists(nonce_key):
+        logger.warning(f"Replay attempt detected: {nonce_key}")
+        return False
+
+    # Store nonce with 120-second TTL
+    # (timestamp window is 60s, allow 2x for clock skew)
+    redis_client.setex(nonce_key, 120, "1")
+    return True
+
+
 async def get_authenticated_agent(
     request: Request,
     x_agent_id: str = Header(..., alias="X-Agent-ID"),
@@ -66,9 +104,13 @@ async def get_authenticated_agent(
 
     Raises HTTPException(401) if:
     - Timestamp is out of window (replay protection)
+    - Request is a replay (nonce already seen)
     - Agent not found in DB
     - Signature is invalid
     """
+    # Get redis client from request app state
+    redis_client = request.app.state.redis_client
+
     # 1. Replay protection: reject stale timestamps
     try:
         ts = int(x_timestamp)
@@ -78,20 +120,24 @@ async def get_authenticated_agent(
     if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
         raise HTTPException(status_code=401, detail="Request timestamp out of window")
 
-    # 2. Look up agent's public key
+    # 2. Nonce-based replay attack prevention
+    if not validate_and_store_nonce(x_signature, redis_client):
+        raise HTTPException(status_code=401, detail="Request already processed (replay attack detected)")
+
+    # 3. Look up agent's public key
     result = await db.execute(select(Agent).where(Agent.agent_id == x_agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
         raise HTTPException(status_code=401, detail="Unknown agent")
 
-    # 3. Reconstruct signed payload
+    # 4. Reconstruct signed payload
     body = await request.body()
     body_sha256 = hashlib.sha256(body).hexdigest() if body else EMPTY_BODY_SHA256
     method = request.method.upper()
     path = request.url.path
     signed_payload = f"{method}:{path}:{x_timestamp}:{body_sha256}"
 
-    # 4. Verify signature
+    # 5. Verify signature
     try:
         raw_pub_key = urlsafe_b64decode(_add_padding(agent.public_key))
         pub_key = Ed25519PublicKey.from_public_bytes(raw_pub_key)
