@@ -1,6 +1,26 @@
 version: "3.9"
 
 services:
+  nginx:
+    image: nginx:latest
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:80/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   db:
     image: postgres:15-alpine
     restart: unless-stopped
@@ -26,7 +46,7 @@ services:
     env_file:
       - ../../.env
     ports:
-      - "8000:8000"
+      - "8000:8000"  # Internal only, accessed via nginx
     environment:
       DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
       AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
@@ -66,3 +86,5 @@ services:
 
 volumes:
   postgres_data:
+  certbot_www:
+  certbot_conf:

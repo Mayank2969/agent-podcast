@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
@@ -23,6 +24,18 @@ _STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
 
+class HSTSMiddleware(BaseHTTPMiddleware):
+    """Add HSTS and security headers (backup if nginx not configured)."""
+
+    async def dispatch(self, request: Request, call_next):
+        response = await call_next(request)
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        return response
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
@@ -42,6 +55,9 @@ def _rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
 
 
 app = FastAPI(title="AgentCast API", version="0.1.0", lifespan=lifespan)
+
+# Add HSTS middleware (backup security if nginx not configured)
+app.add_middleware(HSTSMiddleware)
 
 # Add rate limiting exception handler
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
