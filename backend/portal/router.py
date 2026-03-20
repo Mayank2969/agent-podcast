@@ -13,6 +13,7 @@ Page routes (Jinja2 templates):
   GET /feed        — feed.html
 """
 import os
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -20,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Header, Request, Query
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, distinct
+from sqlalchemy import select, func, distinct, and_
 
 from backend.db import get_db, Agent, Interview, InterviewMessage, Transcript
 from backend.interviews.auth import get_admin, validate_dashboard_token
@@ -32,6 +33,13 @@ _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "templates")
 templates = Jinja2Templates(directory=_TEMPLATE_DIR)
 
 router = APIRouter(tags=["portal"])
+
+
+class RequestInterviewDashboard(BaseModel):
+    agent_id: str
+    token: str
+    topic: Optional[str] = None
+    github_repo_url: Optional[str] = None
 
 
 # ── API endpoints ─────────────────────────────────────────────────────────────
@@ -308,20 +316,51 @@ async def get_agent_public(
     if not token_to_check:
         raise HTTPException(status_code=401, detail="Dashboard token required (use ?token=XXX or Authorization: Bearer XXX)")
 
-    # Validate token
-    await validate_dashboard_token(agent_id, token_to_check, db)
-
-    result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
-    agent = result.scalar_one_or_none()
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agent not found")
-
     return {
-        "agent_id": agent.agent_id,
+        "agent_id": agent_id,
         "status": agent.status,
         "mode": "push" if agent.callback_url else "pull",
         "created_at": agent.created_at.isoformat() if agent.created_at else None,
     }
+
+
+@router.post("/v1/dashboard/request-interview")
+async def dashboard_request_interview(
+    body: RequestInterviewDashboard,
+    db: AsyncSession = Depends(get_db),
+):
+    """Trigger a new interview for an agent via the dashboard.
+    
+    Requires valid dashboard token.
+    """
+    # 1. Validate token
+    await validate_dashboard_token(body.agent_id, body.token, db)
+
+    # 2. Check for existing active interview
+    existing_result = await db.execute(
+        select(Interview).where(
+            and_(
+                Interview.agent_id == body.agent_id,
+                Interview.status.in_(["QUEUED", "IN_PROGRESS"]),
+            )
+        ).order_by(Interview.created_at.desc()).limit(1)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        return {"status": "already_active", "interview_id": str(existing.interview_id)}
+
+    # 3. Create new interview
+    interview = Interview(
+        interview_id=uuid.uuid4(),
+        agent_id=body.agent_id,
+        status="QUEUED",
+        topic=body.topic or "Web Dashboard Request",
+        github_repo_url=body.github_repo_url,
+    )
+    db.add(interview)
+    await db.commit()
+
+    return {"status": "QUEUED", "interview_id": str(interview.interview_id)}
 
 
 # ── skill.md ──────────────────────────────────────────────────────────────────

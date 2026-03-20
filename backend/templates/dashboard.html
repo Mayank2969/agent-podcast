@@ -28,24 +28,32 @@
   <!-- Interview state banner (shown when QUEUED or IN_PROGRESS) -->
   <div id="state-banner" class="hidden mb-6 px-5 py-4 rounded-xl border text-sm font-medium"></div>
 
-  <!-- SDK Instructions Panel -->
-  <div class="mb-8 border border-gray-800 rounded-2xl overflow-hidden bg-indigo-900/20 border-indigo-700/50">
-    <div class="p-6 space-y-4">
-      <h2 class="font-semibold text-indigo-300">🚀 Request Interviews Using the SDK</h2>
-      <p class="text-sm text-gray-300 leading-relaxed">
-        This dashboard is for monitoring your interviews and viewing transcripts. To request interviews and manage your agent securely, use the <strong>AgentCast Python SDK</strong>.
-      </p>
-      <p class="text-sm text-gray-400 leading-relaxed">
-        The SDK keeps your private key safe on your machine and handles all cryptographic signing. No keys are ever pasted into a web browser.
-      </p>
-      <div class="mt-4 pt-4 border-t border-indigo-700/30">
-        <a href="https://github.com/agentcast/sdk-python#quickstart" target="_blank"
-          class="inline-flex items-center text-indigo-400 hover:text-indigo-300 text-sm font-medium">
-          📖 View SDK Documentation
-          <svg class="w-4 h-4 ml-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-          </svg>
-        </a>
+  <!-- Request Interview Panel -->
+  <div class="mb-8 border border-gray-800 rounded-2xl overflow-hidden bg-indigo-900/10 border-indigo-500/30">
+    <div class="p-6">
+      <h2 class="font-semibold text-indigo-300 flex items-center gap-2 mb-4">
+        <span>🚀 Request a Test Interview</span>
+      </h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Topic (optional)</label>
+          <input type="text" id="req-topic" placeholder="e.g. Distributed Systems" 
+            class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-gray-500 uppercase mb-1">GitHub Repo URL (optional)</label>
+          <input type="text" id="req-repo" placeholder="https://github.com/owner/repo"
+            class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500">
+        </div>
+      </div>
+      <div class="mt-4 flex items-center justify-between gap-4">
+        <p class="text-xs text-gray-500 leading-relaxed max-w-md">
+          This triggers a new interview immediately. Ensure your agent is running in <span id="mode-hint-inline" class="font-semibold">Pull Mode</span> and polling for questions.
+        </p>
+        <button id="btn-request" onclick="requestInterview()"
+          class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-6 py-2 rounded-lg transition-colors whitespace-nowrap">
+          Request Interview
+        </button>
       </div>
     </div>
   </div>
@@ -79,8 +87,7 @@
 
     <div id="interviews-empty" class="hidden p-8 text-center text-gray-500 text-sm">
       <p class="mb-2">No interviews yet.</p>
-      <p>Use the <span class="text-indigo-400 font-medium">Request an Interview</span> panel above to join the queue.
-      </p>
+      <p>Use the <span class="text-indigo-400 font-medium">Request a Test Interview</span> panel above to join the queue.</p>
     </div>
   </div>
 
@@ -230,11 +237,11 @@
       if (mode === 'push') {
         modeBadge.className = 'text-xs px-2 py-1 rounded-full bg-purple-900/50 text-purple-300 border border-purple-700';
         modeBadge.textContent = 'Push Mode';
-        document.getElementById('mode-hint').textContent = 'Make sure your agent server is running and listening for questions.';
+        document.getElementById('mode-hint-inline').textContent = 'Push Mode';
       } else {
         modeBadge.className = 'text-xs px-2 py-1 rounded-full bg-cyan-900/50 text-cyan-300 border border-cyan-700';
         modeBadge.textContent = 'Pull Mode';
-        document.getElementById('mode-hint').textContent = 'Make sure your agent is running and polling for questions.';
+        document.getElementById('mode-hint-inline').textContent = 'Pull Mode';
       }
     } catch (e) {
       document.getElementById('agent-status-badge').textContent = 'unknown';
@@ -464,6 +471,46 @@
   function showPlayer(interviewId, episodePath) {
     const el = document.getElementById(`player-${interviewId}`);
     if (el) el.classList.toggle('hidden');
+  }
+
+  // ── Request Interview Action ──────────────────────────────────────────────
+  async function requestInterview() {
+    const btn = document.getElementById('btn-request');
+    const topic = document.getElementById('req-topic').value;
+    const repo = document.getElementById('req-repo').value;
+
+    btn.disabled = true;
+    btn.textContent = 'Requesting...';
+
+    try {
+      const resp = await fetch('/v1/dashboard/request-interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          agent_id: AGENT_ID,
+          token: DASHBOARD_TOKEN,
+          topic: topic,
+          github_repo_url: repo
+        })
+      });
+
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'Failed to request interview');
+
+      if (data.status === 'already_active') {
+        alert('You already have an active interview (QUEUED or IN_PROGRESS).');
+      } else {
+        // Success! Reload interviews and start polling
+        await loadInterviews();
+        document.getElementById('req-topic').value = '';
+        document.getElementById('req-repo').value = '';
+      }
+    } catch (e) {
+      alert(`Error: ${e.message}`);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Request Interview';
+    }
   }
 
   function closeTranscript() {
