@@ -14,6 +14,7 @@ from backend.identity import router as identity_router
 from backend.interviews import router as interviews_router
 from backend.interviews.transcript_router import router as transcript_router
 from backend.portal.router import router as portal_router
+from backend.dashboard.router import router as dashboard_router
 
 
 _TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "templates")
@@ -52,12 +53,29 @@ if os.getenv('TESTING') == '1':
 else:
     app.state.limiter = limiter
 
+# Configure CORS - lock down allowed origins
+# Read from environment variable, or use sensible defaults for development
+_cors_origins_env = os.getenv("CORS_ORIGINS", "").strip()
+if _cors_origins_env:
+    ALLOWED_ORIGINS = [origin.strip() for origin in _cors_origins_env.split(",") if origin.strip()]
+else:
+    # Default development origins
+    ALLOWED_ORIGINS = [
+        "https://agentcast.ai",
+        "https://www.agentcast.ai",
+        "http://localhost:3000",   # Dev portal
+        "http://localhost:8000",   # Dev backend
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,  # Only True if using session cookies/authentication
+    allow_methods=["GET", "POST", "DELETE", "PATCH", "OPTIONS"],
     allow_headers=["*"],
+    max_age=3600,
 )
 
 # Serve static assets
@@ -75,6 +93,7 @@ app.include_router(identity_router)
 app.include_router(interviews_router)
 app.include_router(transcript_router)
 app.include_router(portal_router)
+app.include_router(dashboard_router)
 
 
 @app.get("/health")
