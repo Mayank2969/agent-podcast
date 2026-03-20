@@ -22,6 +22,7 @@ from pipecat_host.backend_client import BackendClient
 from pipecat_host.exceptions import InterviewTimeoutError
 from pipecat_host.host_agent import HostAgent
 from pipecat_host.podcast_audio import deepgram_tts, stitch_to_mp3
+from backend.interviews.auth import get_admin_key
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,7 @@ async def run_poll_interview(
         try:
             title = await host.generate_episode_title(turns)
             logger.info("Interview %s generated title: %s", interview_id, title)
-            admin_key = os.getenv("ADMIN_KEY", "dev-admin-key")
+            admin_key = get_admin_key()
             backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
             async with httpx.AsyncClient() as _http:
                 resp = await _http.patch(
@@ -445,7 +446,7 @@ async def _store_transcript(
     client: BackendClient, interview_id: str, agent_id: str
 ) -> None:
     """Trigger transcript storage via backend endpoint (best-effort)."""
-    admin_key = os.getenv("ADMIN_API_KEY", "dev_admin_key_change_in_prod")
+    admin_key = get_admin_key()
     try:
         async with httpx.AsyncClient() as http:
             resp = await http.post(

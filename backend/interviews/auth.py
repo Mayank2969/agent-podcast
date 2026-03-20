@@ -35,6 +35,22 @@ def _add_padding(b64: str) -> str:
     return b64 + "=" * ((4 - len(b64) % 4) % 4)
 
 
+def get_admin_key() -> str:
+    """Get ADMIN_API_KEY from environment. Fail hard if not set.
+
+    Raises RuntimeError if ADMIN_API_KEY is not configured.
+    This is required for production security.
+    """
+    key = os.getenv("ADMIN_API_KEY")
+    if not key:
+        raise RuntimeError(
+            "ADMIN_API_KEY environment variable not set. "
+            "This is required for production. "
+            "Set: export ADMIN_API_KEY=<your-secret-key>"
+        )
+    return key
+
+
 async def get_authenticated_agent(
     request: Request,
     x_agent_id: str = Header(..., alias="X-Agent-ID"),
@@ -87,7 +103,7 @@ async def get_admin(
     x_admin_key: str = Header(..., alias="X-Admin-Key"),
 ) -> str:
     """FastAPI dependency: verify ADMIN_API_KEY. Returns key if valid."""
-    admin_key = os.getenv("ADMIN_API_KEY", "dev_admin_key_change_in_prod")
+    admin_key = get_admin_key()
     if x_admin_key != admin_key:
         raise HTTPException(status_code=403, detail="Invalid admin key")
     return x_admin_key

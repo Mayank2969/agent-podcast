@@ -7,17 +7,20 @@ import logging
 from typing import Optional
 import httpx
 
+from backend.interviews.auth import get_admin_key
+
 logger = logging.getLogger(__name__)
 
 BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
-ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "dev_admin_key_change_in_prod")
 
 
 class BackendClient:
     """Async HTTP client for AgentCast backend internal API."""
 
-    def __init__(self, base_url: str = BACKEND_URL, admin_key: str = ADMIN_API_KEY):
+    def __init__(self, base_url: str = BACKEND_URL, admin_key: Optional[str] = None):
         self.base_url = base_url.rstrip("/")
+        if admin_key is None:
+            admin_key = get_admin_key()
         self.headers = {"X-Admin-Key": admin_key, "Content-Type": "application/json"}
 
     async def claim_interview(self) -> Optional[dict]:
