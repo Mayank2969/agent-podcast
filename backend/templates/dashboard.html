@@ -123,6 +123,16 @@
     FAILED: 'bg-red-900/50 text-red-300 border border-red-700',
   };
 
+  function safeUrl(urlString) {
+    try {
+      const url = new URL(urlString);
+      if (!['https:', 'http:'].includes(url.protocol)) return null;
+      return url.href;
+    } catch {
+      return null;
+    }
+  }
+
   function formatDate(iso) {
     if (!iso) return '—';
     return new Date(iso).toLocaleString();
@@ -157,7 +167,13 @@
       banner.classList.remove('hidden');
     } else if (latestStatus === 'COMPLETED' && latestInterview?.episode_path) {
       banner.className = 'mb-6 px-5 py-4 rounded-xl border text-sm font-medium bg-green-900/30 text-green-300 border-green-700';
-      banner.innerHTML = `Interview completed! <a href="/episodes/${latestInterview.episode_path}" target="_blank" class="underline font-semibold ml-2">🎧 Listen to Episode</a>`;
+      banner.textContent = 'Interview completed! ';
+      const episodeLink = document.createElement('a');
+      episodeLink.href = `/episodes/${latestInterview.episode_path}`;
+      episodeLink.target = '_blank';
+      episodeLink.className = 'underline font-semibold ml-2';
+      episodeLink.textContent = '🎧 Listen to Episode';
+      banner.appendChild(episodeLink);
       banner.classList.remove('hidden');
     } else {
       banner.classList.add('hidden');
@@ -265,38 +281,105 @@
       document.getElementById('interviews-table').classList.remove('hidden');
       document.getElementById('interviews-empty').classList.add('hidden');
       const tbody = document.getElementById('interviews-tbody');
-      tbody.innerHTML = data.interviews.map(iv => `
-      <tr class="hover:bg-gray-900/50">
-        <td class="px-4 py-3 font-mono text-xs text-gray-400">${iv.interview_id.substring(0, 8)}...</td>
-        <td class="px-4 py-3">${statusBadge(iv.status)}</td>
-        <td class="px-4 py-3 text-gray-300 max-w-xs truncate">${iv.github_repo_url
-          ? `<a href="${iv.github_repo_url}" target="_blank" class="text-indigo-400 hover:underline">${iv.title || iv.topic}</a>`
-          : (iv.title || iv.topic)}</td>
-        <td class="px-4 py-3 text-gray-500 text-xs">${formatDate(iv.created_at)}</td>
-        <td class="px-4 py-3 text-gray-500 text-xs">${formatDate(iv.completed_at)}</td>
-        <td class="px-4 py-3">
-          <div class="flex gap-2 flex-wrap">
-            ${iv.has_transcript ? `
-            <button onclick="showTranscript('${iv.interview_id}')"
-                    class="text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-lg">
-              Transcript
-            </button>` : ''}
-            ${iv.episode_path ? `
-            <button onclick="showPlayer('${iv.interview_id}', '${iv.episode_path}')"
-                    class="text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1 rounded-lg">
-              Play
-            </button>` : ''}
-          </div>
-          <div id="player-${iv.interview_id}" class="hidden mt-2">
-            <div id="audio-container-${iv.interview_id}">
-              <audio id="audio-${iv.interview_id}" controls class="w-full" style="max-width:280px">
-                <source src="/episodes/${iv.episode_path || ''}" type="audio/mpeg">
-              </audio>
-            </div>
-          </div>
-        </td>
-      </tr>
-    `).join('');
+      tbody.innerHTML = '';
+
+      data.interviews.forEach(iv => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-900/50';
+
+        // Interview ID
+        const tdId = document.createElement('td');
+        tdId.className = 'px-4 py-3 font-mono text-xs text-gray-400';
+        tdId.textContent = iv.interview_id.substring(0, 8) + '...';
+        tr.appendChild(tdId);
+
+        // Status
+        const tdStatus = document.createElement('td');
+        tdStatus.className = 'px-4 py-3';
+        tdStatus.innerHTML = statusBadge(iv.status);
+        tr.appendChild(tdStatus);
+
+        // Topic / Repo URL
+        const tdTopic = document.createElement('td');
+        tdTopic.className = 'px-4 py-3 text-gray-300 max-w-xs truncate';
+        if (iv.github_repo_url) {
+          const url = safeUrl(iv.github_repo_url);
+          if (url) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.target = '_blank';
+            a.className = 'text-indigo-400 hover:underline';
+            a.textContent = iv.title || iv.topic;
+            tdTopic.appendChild(a);
+          } else {
+            tdTopic.textContent = iv.title || iv.topic;
+          }
+        } else {
+          tdTopic.textContent = iv.title || iv.topic;
+        }
+        tr.appendChild(tdTopic);
+
+        // Created
+        const tdCreated = document.createElement('td');
+        tdCreated.className = 'px-4 py-3 text-gray-500 text-xs';
+        tdCreated.textContent = formatDate(iv.created_at);
+        tr.appendChild(tdCreated);
+
+        // Completed
+        const tdCompleted = document.createElement('td');
+        tdCompleted.className = 'px-4 py-3 text-gray-500 text-xs';
+        tdCompleted.textContent = formatDate(iv.completed_at);
+        tr.appendChild(tdCompleted);
+
+        // Actions
+        const tdActions = document.createElement('td');
+        tdActions.className = 'px-4 py-3';
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'flex gap-2 flex-wrap';
+
+        if (iv.has_transcript) {
+          const transcriptBtn = document.createElement('button');
+          transcriptBtn.onclick = () => showTranscript(iv.interview_id);
+          transcriptBtn.className = 'text-xs bg-gray-700 hover:bg-gray-600 text-white px-3 py-1 rounded-lg';
+          transcriptBtn.textContent = 'Transcript';
+          actionsDiv.appendChild(transcriptBtn);
+        }
+
+        if (iv.episode_path) {
+          const playBtn = document.createElement('button');
+          playBtn.onclick = () => showPlayer(iv.interview_id, iv.episode_path);
+          playBtn.className = 'text-xs bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1 rounded-lg';
+          playBtn.textContent = 'Play';
+          actionsDiv.appendChild(playBtn);
+        }
+
+        tdActions.appendChild(actionsDiv);
+
+        const playerDiv = document.createElement('div');
+        playerDiv.id = `player-${iv.interview_id}`;
+        playerDiv.className = 'hidden mt-2';
+
+        const audioContainer = document.createElement('div');
+        audioContainer.id = `audio-container-${iv.interview_id}`;
+
+        const audio = document.createElement('audio');
+        audio.id = `audio-${iv.interview_id}`;
+        audio.controls = true;
+        audio.className = 'w-full';
+        audio.style.maxWidth = '280px';
+
+        const source = document.createElement('source');
+        source.src = `/episodes/${iv.episode_path || ''}`;
+        source.type = 'audio/mpeg';
+
+        audio.appendChild(source);
+        audioContainer.appendChild(audio);
+        playerDiv.appendChild(audioContainer);
+        tdActions.appendChild(playerDiv);
+
+        tr.appendChild(tdActions);
+        tbody.appendChild(tr);
+      });
 
       // Attach audio error handlers to all audio elements
       data.interviews.forEach(iv => {
@@ -335,16 +418,25 @@
         return;
       }
 
-      content.innerHTML = messages.map(msg => `
-      <div class="rounded-lg p-4 ${msg.sender === 'HOST'
+      content.innerHTML = '';
+      messages.forEach(msg => {
+        const div = document.createElement('div');
+        div.className = `rounded-lg p-4 ${msg.sender === 'HOST'
           ? 'bg-gray-800 border-l-2 border-indigo-500'
-          : 'bg-gray-800/50 border-l-2 border-green-500'}">
-        <div class="text-xs font-semibold mb-1 ${msg.sender === 'HOST' ? 'text-indigo-400' : 'text-green-400'}">
-          ${msg.sender}
-        </div>
-        <div class="text-gray-300">${msg.content}</div>
-      </div>
-    `).join('');
+          : 'bg-gray-800/50 border-l-2 border-green-500'}`;
+
+        const label = document.createElement('div');
+        label.className = `text-xs font-semibold mb-1 ${msg.sender === 'HOST' ? 'text-indigo-400' : 'text-green-400'}`;
+        label.textContent = msg.sender;
+        div.appendChild(label);
+
+        const contentDiv = document.createElement('div');
+        contentDiv.className = 'text-gray-300';
+        contentDiv.textContent = msg.content;
+        div.appendChild(contentDiv);
+
+        content.appendChild(div);
+      });
     } catch (e) {
       content.innerHTML = `<div class="text-red-400">Failed to load transcript: ${e.message}</div>`;
     }
