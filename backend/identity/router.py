@@ -13,6 +13,7 @@ import hashlib
 import ipaddress
 import secrets
 import socket
+import html
 from base64 import urlsafe_b64decode, b64encode
 from urllib.parse import urlparse
 
@@ -21,7 +22,7 @@ from cryptography.exceptions import InvalidKey
 from typing import Optional, Tuple
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -66,7 +67,23 @@ router = APIRouter(prefix="/v1", tags=["identity"])
 class RegisterRequest(BaseModel):
     public_key: str = Field(min_length=43, max_length=43, description="base64url-encoded raw 32-byte ED25519 public key")
     callback_url: Optional[str] = Field(default=None, max_length=500, description="Agent's HTTP callback URL for push mode")
-    display_name: Optional[str] = Field(default=None, max_length=200, description="Agent display name")
+    display_name: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Agent display name (max 100 chars, HTML escaped)"
+    )
+
+    @field_validator('display_name')
+    @classmethod
+    def sanitize_display_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize display name: escape HTML, strip whitespace."""
+        if v is None:
+            return None
+        # Escape HTML special characters
+        v = html.escape(str(v))
+        # Strip leading/trailing whitespace
+        v = v.strip()
+        return v if v else None
 
 
 class RegisterResponse(BaseModel):
