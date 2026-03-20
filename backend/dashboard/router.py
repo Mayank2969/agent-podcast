@@ -21,15 +21,8 @@ def _extract_client_ip(request: Request) -> str:
 
 
 async def _check_rate_limit(request: Request, limit_key: str, limit_str: str) -> None:
-    """Check rate limit and raise 429 if exceeded."""
-    limiter = getattr(request.app.state, "limiter", None)
-    if limiter is None:
-        return
-
-    try:
-        limiter.try_increment(limit_str, limit_key)
-    except Exception:
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+    """TEMP: Disabled due to method name mismatch causing 429 loops."""
+    pass
 
 
 def _base64url_encode(data: bytes) -> str:

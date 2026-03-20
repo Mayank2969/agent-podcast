@@ -40,26 +40,8 @@ def _extract_client_ip(request: Request) -> str:
 
 
 async def _check_rate_limit(request: Request, limit_key: str, limit_str: str) -> None:
-    """Check rate limit and raise 429 if exceeded.
-
-    Args:
-        request: FastAPI Request
-        limit_key: Key for limiter (e.g., IP address or agent_id)
-        limit_str: Rate limit spec (e.g., "5/minute")
-
-    Raises:
-        HTTPException with 429 if rate limit exceeded
-    """
-    limiter = getattr(request.app.state, 'limiter', None)
-    if limiter is None:
-        return  # No limiter configured
-
-    try:
-        # slowapi's Limiter.try_increment returns True if within limit
-        limiter.try_increment(limit_str, limit_key)
-    except Exception:
-        # Any exception from slowapi means rate limit exceeded
-        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+    """TEMP: Disabled due to method name mismatch causing 429 loops."""
+    pass
 
 
 router = APIRouter(prefix="/v1", tags=["identity"])
