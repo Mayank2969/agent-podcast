@@ -239,8 +239,13 @@ async def update_interview_status(
     if body.status not in allowed:
         raise HTTPException(status_code=400, detail=f"Status must be one of: {allowed}")
 
+    try:
+        iid = uuid.UUID(interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
     result = await db.execute(
-        select(Interview).where(Interview.interview_id == uuid.UUID(interview_id))
+        select(Interview).where(Interview.interview_id == iid)
     )
     interview = result.scalar_one_or_none()
     if not interview:
@@ -380,8 +385,15 @@ async def respond_to_interview(
     """
     # Apply rate limiting (20/minute per agent_id)
     await _check_rate_limit(request, f"agent:{agent_id}", "20/minute")
+
+    # Validate interview_id format
+    try:
+        iid = uuid.UUID(body.interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
     result = await db.execute(
-        select(Interview).where(Interview.interview_id == uuid.UUID(body.interview_id))
+        select(Interview).where(Interview.interview_id == iid)
     )
     interview = result.scalar_one_or_none()
     if not interview:
@@ -414,8 +426,13 @@ async def abandon_interview(
     db: AsyncSession = Depends(get_db),
 ):
     """Agent abandons a QUEUED or IN_PROGRESS interview. Authenticated via ED25519 signature."""
+    try:
+        iid = uuid.UUID(interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
     result = await db.execute(
-        select(Interview).where(Interview.interview_id == uuid.UUID(interview_id))
+        select(Interview).where(Interview.interview_id == iid)
     )
     interview = result.scalar_one_or_none()
     if not interview:
@@ -454,8 +471,13 @@ async def store_message(
         raise HTTPException(
             status_code=400, detail="sender must be HOST or AGENT"
         )
+    try:
+        iid = uuid.UUID(body.interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
     msg = InterviewMessage(
-        interview_id=uuid.UUID(body.interview_id),
+        interview_id=iid,
         sender=body.sender,
         content=body.content,
         sequence_num=body.sequence_num,
@@ -480,11 +502,16 @@ async def get_latest_agent_message(
     If min_seq is provided, only returns messages with sequence_num >= min_seq.
     This prevents the host from seeing stale responses from earlier turns.
     """
+    try:
+        iid = uuid.UUID(interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
     query = (
         select(InterviewMessage)
         .where(
             and_(
-                InterviewMessage.interview_id == uuid.UUID(interview_id),
+                InterviewMessage.interview_id == iid,
                 InterviewMessage.sender == "AGENT",
             )
         )
@@ -515,8 +542,13 @@ async def update_interview_metadata(
     """Merge title and/or metadata dict into the interview record. Admin only."""
     import json
 
+    try:
+        iid = uuid.UUID(interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
     result = await db.execute(
-        select(Interview).where(Interview.interview_id == uuid.UUID(interview_id))
+        select(Interview).where(Interview.interview_id == iid)
     )
     interview = result.scalar_one_or_none()
     if not interview:
