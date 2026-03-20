@@ -7,7 +7,7 @@ import logging
 from typing import Optional
 import httpx
 
-from backend.db.session import get_admin_key
+from backend.config import get_admin_key
 
 logger = logging.getLogger(__name__)
 

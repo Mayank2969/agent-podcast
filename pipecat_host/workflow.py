@@ -25,7 +25,7 @@ from pipecat_host.backend_client import BackendClient
 from pipecat_host.exceptions import InterviewTimeoutError
 from pipecat_host.host_agent import HostAgent
 from pipecat_host.podcast_audio import deepgram_tts, stitch_to_mp3
-from backend.db.session import get_admin_key
+from backend.config import get_admin_key
 from pathlib import Path
 
 logger = logging.getLogger(__name__)

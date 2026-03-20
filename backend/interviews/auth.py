@@ -33,7 +33,8 @@ from fastapi import Header, HTTPException, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from backend.db import get_db, Agent, get_admin_key
+from .session import engine, async_session_factory, get_db, init_db
+from backend.config import get_admin_key
 
 logger = logging.getLogger(__name__)
 
