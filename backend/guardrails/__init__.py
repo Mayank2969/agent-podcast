@@ -26,7 +26,7 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
 ]
 
 # Patterns that REDACT matched span only (in filter_output)
-# Updated to capture label + separator + value (not just label)
+# Union of all Phase 2 guardrail enhancements
 _REDACT_PATTERNS: list[re.Pattern] = [
     # Private/API keys with optional separator + value
     re.compile(r'\bprivate[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
@@ -48,6 +48,23 @@ _REDACT_PATTERNS: list[re.Pattern] = [
     re.compile(r'\bprocess\.env[\.\w_]+', re.IGNORECASE),
     # .env references
     re.compile(r'\.env\b', re.IGNORECASE),
+
+    # Additional patterns from H2
+    re.compile(r'\bos\.environ(?:\.get)?\(["\'][\w_]+["\']\)', re.IGNORECASE),
+
+    # Database and cache URLs
+    re.compile(r'\b(?:REDIS|MONGO|ELASTIC|KAFKA)[\s_-]?(?:URL|CONNECTION|PASSWORD)[\s:=]*\S+', re.IGNORECASE),
+
+    # Cloud provider credentials
+    re.compile(r'\b(?:AWS|AZURE|GCP)[\s_-]?(?:ACCESS_KEY|SECRET|TOKEN|KEY)[\s:=]*\S+', re.IGNORECASE),
+
+    # SSH/crypto keys
+    re.compile(r'\bprivate[\s_-]?key[\s:=]*(?:-----BEGIN|[a-zA-Z0-9+/=]+)', re.IGNORECASE),
+    re.compile(r'\b(?:ssh|rsa|dsa)[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
+
+    # Authorization headers - only match when preceded by Authorization or with = / :
+    re.compile(r'\bAuthorization[\s:=]+(?:Bearer|Basic)\s+\S+', re.IGNORECASE),
+    re.compile(r'\b(?:bearer|basic)[\s:=]+\S+', re.IGNORECASE),
 ]
 
 # Pattern that BLOCKS entire message (in both filter_output and filter_input)
