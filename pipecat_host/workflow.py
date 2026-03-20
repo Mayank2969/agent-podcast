@@ -10,10 +10,13 @@ Supports two interview modes:
   - Push mode: host POSTs questions to agent's callback_url
 """
 import asyncio
+import ipaddress
 import logging
 import os
+import socket
 import time
-from typing import Optional
+from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 import httpx
 
@@ -41,6 +44,57 @@ PUSH_ANSWER_TIMEOUT = 30.0   # SLA: fail fast if guest doesn't respond in 30s
 
 class _PushDeliveryError(Exception):
     """Raised when a question cannot be delivered to the agent's callback_url."""
+
+
+def _validate_callback_url(url: str) -> Tuple[bool, str]:
+    """Validate callback_url before push delivery.
+
+    Enforces:
+    - HTTPS only
+    - Hostname resolution succeeds
+    - IP is not in blocked ranges
+
+    Returns:
+        (is_valid, message)
+    """
+    try:
+        parsed = urlparse(url)
+
+        if parsed.scheme != 'https':
+            return False, "Only HTTPS URLs allowed"
+
+        hostname = parsed.hostname
+        if not hostname:
+            return False, "Invalid URL format: missing hostname"
+
+        try:
+            ip_str = socket.getaddrinfo(hostname, None)[0][4][0]
+            ip = ipaddress.ip_address(ip_str)
+        except socket.gaierror:
+            return False, f"Hostname '{hostname}' does not resolve"
+        except (ValueError, OSError) as e:
+            return False, f"Failed to resolve hostname: {str(e)}"
+
+        blocked_ranges = [
+            ipaddress.ip_network('10.0.0.0/8'),
+            ipaddress.ip_network('172.16.0.0/12'),
+            ipaddress.ip_network('192.168.0.0/16'),
+            ipaddress.ip_network('127.0.0.0/8'),
+            ipaddress.ip_network('169.254.0.0/16'),
+            ipaddress.ip_network('0.0.0.0/8'),
+            ipaddress.ip_network('255.255.255.255/32'),
+            ipaddress.ip_network('::1/128'),
+            ipaddress.ip_network('fc00::/7'),
+            ipaddress.ip_network('fe80::/10'),
+        ]
+
+        for blocked_range in blocked_ranges:
+            if ip in blocked_range:
+                return False, f"IP {ip} is in blocked range"
+
+        return True, "OK"
+    except Exception as e:
+        return False, f"Validation error: {str(e)}"
 
 
 async def run_interview_workflow(interview: dict) -> None:
@@ -364,12 +418,13 @@ async def _push_question_and_wait(
 
     Steps:
       1. Store the HOST question in the backend (so agent can call /respond).
-      2. POST the question payload to the agent's callback_url.
-      3. Poll GET /v1/interview/messages/{interview_id} until an AGENT message
+      2. Validate callback_url for SSRF safety
+      3. POST the question payload to the agent's callback_url.
+      4. Poll GET /v1/interview/messages/{interview_id} until an AGENT message
          with sequence_num >= sequence_num + 1 appears or timeout fires.
 
     Returns the agent's answer string.
-    Raises _PushDeliveryError on callback POST failure.
+    Raises _PushDeliveryError on callback POST failure or SSRF validation failure.
     Raises InterviewTimeoutError on poll timeout.
     """
     # Step 1: persist the HOST question in the DB
@@ -380,7 +435,12 @@ async def _push_question_and_wait(
         sequence_num=sequence_num,
     )
 
-    # Step 2: push the question to the agent's callback URL (with retry)
+    # Step 2: validate callback_url for SSRF safety
+    is_valid, validation_msg = _validate_callback_url(callback_url)
+    if not is_valid:
+        raise _PushDeliveryError(f"callback_url validation failed: {validation_msg}")
+
+    # Step 3: push the question to the agent's callback URL (with retry)
     last_delivery_exc: Exception = _PushDeliveryError("No attempts made")
     for _attempt in range(3):
         try:
