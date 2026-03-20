@@ -16,6 +16,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import Optional
+from pydantic import BaseModel
 
 from fastapi import APIRouter, Depends, HTTPException, Header, Request, Query
 from fastapi.responses import HTMLResponse, FileResponse, PlainTextResponse
