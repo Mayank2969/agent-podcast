@@ -432,6 +432,50 @@ async def abandon_interview(
     return {"status": "FAILED"}
 
 
+@router.get("/{interview_id}/history")
+async def get_interview_history(
+    interview_id: str,
+    agent_id: str = Depends(get_authenticated_agent),
+    db: AsyncSession = Depends(get_db),
+):
+    """Retrieve full message history for an interview owned by the agent.
+    
+    Authenticated via ED25519 signature in headers.
+    """
+    try:
+        iid = uuid.UUID(interview_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
+
+    # 1. Verify ownership
+    result = await db.execute(
+        select(Interview).where(Interview.interview_id == iid)
+    )
+    interview = result.scalar_one_or_none()
+    if not interview:
+        raise HTTPException(status_code=404, detail="Interview not found")
+    if interview.agent_id != agent_id:
+        raise HTTPException(status_code=403, detail="Not your interview")
+
+    # 2. Fetch all messages
+    msg_result = await db.execute(
+        select(InterviewMessage)
+        .where(InterviewMessage.interview_id == iid)
+        .order_by(InterviewMessage.sequence_num.asc())
+    )
+    messages = msg_result.scalars().all()
+
+    return [
+        {
+            "sender": m.sender,
+            "content": m.content,
+            "sequence_num": m.sequence_num,
+            "timestamp": m.timestamp.isoformat(),
+        }
+        for m in messages
+    ]
+
+
 # ── Internal Pipecat endpoints ───────────────────────────────────────────────
 # These endpoints are admin-only and used exclusively by the Pipecat host
 # process to store HOST messages and poll for AGENT responses.
