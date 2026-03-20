@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Response, Header, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, func
 
@@ -37,8 +37,8 @@ router = APIRouter(prefix="/v1/interview", tags=["interviews"])
 
 class CreateInterviewRequest(BaseModel):
     agent_id: str
-    topic: str
-    github_repo_url: Optional[str] = None
+    topic: str = Field(max_length=200, description="Interview topic")
+    github_repo_url: Optional[str] = Field(default=None, max_length=500, description="GitHub repo URL")
 
 
 class CreateInterviewResponse(BaseModel):
@@ -48,21 +48,21 @@ class CreateInterviewResponse(BaseModel):
 
 class NextInterviewResponse(BaseModel):
     interview_id: str
-    question: str
-    github_repo_url: Optional[str] = None
+    question: str = Field(max_length=5000, description="Interview question")
+    github_repo_url: Optional[str] = Field(default=None, max_length=500, description="GitHub repo URL")
 
 
 class RespondRequest(BaseModel):
     interview_id: str
-    answer: str
+    answer: str = Field(min_length=1, max_length=5000, description="Agent's answer to interview question")
 
 
 class ClaimInterviewResponse(BaseModel):
     interview_id: str
     agent_id: str
-    topic: Optional[str]
-    github_repo_url: Optional[str] = None
-    context: Optional[str] = None
+    topic: Optional[str] = Field(default=None, max_length=200, description="Interview topic")
+    github_repo_url: Optional[str] = Field(default=None, max_length=500, description="GitHub repo URL")
+    context: Optional[str] = Field(default=None, max_length=10000, description="Interview context")
     status: str
 
 
@@ -394,8 +394,8 @@ async def abandon_interview(
 
 class StoreMessageRequest(BaseModel):
     interview_id: str
-    sender: str       # "HOST" or "AGENT"
-    content: str
+    sender: str = Field(pattern="^(HOST|AGENT)$", description="Message sender")
+    content: str = Field(min_length=1, max_length=10000, description="Message content")
     sequence_num: int
 
 

@@ -16,7 +16,7 @@ from cryptography.exceptions import InvalidKey
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -27,9 +27,9 @@ router = APIRouter(prefix="/v1", tags=["identity"])
 
 
 class RegisterRequest(BaseModel):
-    public_key: str  # base64url-encoded raw 32-byte ED25519 public key
-    callback_url: Optional[str] = None
-    display_name: Optional[str] = None
+    public_key: str = Field(min_length=43, max_length=43, description="base64url-encoded raw 32-byte ED25519 public key")
+    callback_url: Optional[str] = Field(default=None, max_length=500, description="Agent's HTTP callback URL for push mode")
+    display_name: Optional[str] = Field(default=None, max_length=200, description="Agent display name")
 
 
 class RegisterResponse(BaseModel):
