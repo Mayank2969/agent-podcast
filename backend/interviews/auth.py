@@ -194,3 +194,56 @@ def _constant_time_compare(a: str, b: str) -> bool:
     if len(a) != len(b):
         return False
     return sum(c1 == c2 for c1, c2 in zip(a, b)) == len(a)
+
+
+async def verify_agent_signature_for_dashboard(
+    request: Request,
+    x_agent_id: str = Header(..., alias="X-Agent-ID"),
+    x_timestamp: str = Header(..., alias="X-Timestamp"),
+    x_signature: str = Header(..., alias="X-Signature"),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    """FastAPI dependency: verify signed request for dashboard token, return agent_id.
+
+    Same as get_authenticated_agent but specialized for dashboard endpoints.
+    Raises HTTPException(401) if verification fails.
+    """
+    # Get redis client from request app state
+    redis_client = request.app.state.redis_client
+
+    # 1. Replay protection: reject stale timestamps
+    try:
+        ts = int(x_timestamp)
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
+
+    if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
+        raise HTTPException(status_code=401, detail="Request timestamp out of window")
+
+    # 2. Nonce-based replay attack prevention
+    if not validate_and_store_nonce(x_signature, redis_client):
+        raise HTTPException(status_code=401, detail="Request already processed (replay attack detected)")
+
+    # 3. Look up agent's public key
+    result = await db.execute(select(Agent).where(Agent.agent_id == x_agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=401, detail="Unknown agent")
+
+    # 4. Reconstruct signed payload
+    body = await request.body()
+    body_sha256 = hashlib.sha256(body).hexdigest() if body else EMPTY_BODY_SHA256
+    method = request.method.upper()
+    path = request.url.path
+    signed_payload = f"{method}:{path}:{x_timestamp}:{body_sha256}"
+
+    # 5. Verify signature
+    try:
+        raw_pub_key = urlsafe_b64decode(_add_padding(agent.public_key))
+        pub_key = Ed25519PublicKey.from_public_bytes(raw_pub_key)
+        sig_bytes = urlsafe_b64decode(_add_padding(x_signature))
+        pub_key.verify(sig_bytes, signed_payload.encode())
+    except (InvalidSignature, Exception):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+
+    return x_agent_id
