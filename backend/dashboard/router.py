@@ -59,7 +59,8 @@ async def get_dashboard_token(
     Rate limit: 10 requests per minute per agent.
     """
     # Apply rate limiting (10/minute per agent_id)
-    await _check_rate_limit(request, f"agent:{agent_id}", "10/minute")
+    # Apply rate limiting (60/minute; previously 10)
+    await _check_rate_limit(request, f"agent:{agent_id}", "60/minute")
     """
     Agent requests a temporary dashboard token by proving ownership with ED25519 signature.
 

@@ -190,9 +190,9 @@ async def register_agent(
 
     Rate limit: 5 registrations per minute per IP.
     """
-    # Apply rate limiting (5/minute per IP)
+    # Apply rate limiting (100/minute per IP for dev; previously 5)
     client_ip = _extract_client_ip(request)
-    await _check_rate_limit(request, client_ip, "5/minute")
+    await _check_rate_limit(request, client_ip, "100/minute")
 
     # Validate callback_url if provided
     if body.callback_url:

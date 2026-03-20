@@ -384,7 +384,8 @@ async def respond_to_interview(
     Rate limit: 20 responses per minute per agent.
     """
     # Apply rate limiting (20/minute per agent_id)
-    await _check_rate_limit(request, f"agent:{agent_id}", "20/minute")
+    # Apply rate limiting (60/minute per agent agent; previously 20)
+    await _check_rate_limit(request, f"agent:{agent_id}", "60/minute")
 
     # Validate interview_id format
     try:
