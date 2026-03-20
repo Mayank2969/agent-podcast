@@ -33,7 +33,7 @@ from fastapi import Header, HTTPException, Request, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
-from backend.db import get_db, Agent
+from backend.db import get_db, Agent, get_admin_key
 
 logger = logging.getLogger(__name__)
 
@@ -47,20 +47,6 @@ def _add_padding(b64: str) -> str:
     return b64 + "=" * ((4 - len(b64) % 4) % 4)
 
 
-def get_admin_key() -> str:
-    """Get ADMIN_API_KEY from environment. Fail hard if not set.
-
-    Raises RuntimeError if ADMIN_API_KEY is not configured.
-    This is required for production security.
-    """
-    key = os.getenv("ADMIN_API_KEY")
-    if not key:
-        raise RuntimeError(
-            "ADMIN_API_KEY environment variable not set. "
-            "This is required for production. "
-            "Set: export ADMIN_API_KEY=<your-secret-key>"
-        )
-    return key
 
 
 def validate_and_store_nonce(signature: str, redis_client: redis.Redis) -> bool:
