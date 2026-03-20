@@ -30,6 +30,38 @@ from backend.db import get_db, Agent, Interview, InterviewMessage
 from backend.guardrails import filter_output
 from backend.interviews.auth import get_authenticated_agent, get_admin
 
+
+def _extract_client_ip(request: Request) -> str:
+    """Extract client IP from request, considering X-Forwarded-For."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+async def _check_rate_limit(request: Request, limit_key: str, limit_str: str) -> None:
+    """Check rate limit and raise 429 if exceeded.
+
+    Args:
+        request: FastAPI Request
+        limit_key: Key for limiter (e.g., agent_id or IP)
+        limit_str: Rate limit spec (e.g., "20/minute")
+
+    Raises:
+        HTTPException with 429 if rate limit exceeded
+    """
+    limiter = getattr(request.app.state, 'limiter', None)
+    if limiter is None:
+        return  # No limiter configured
+
+    try:
+        # slowapi's Limiter.try_increment returns True if within limit
+        limiter.try_increment(limit_str, limit_key)
+    except Exception:
+        # Any exception from slowapi means rate limit exceeded
+        raise HTTPException(status_code=429, detail="Rate limit exceeded. Try again later.")
+
+
 router = APIRouter(prefix="/v1/interview", tags=["interviews"])
 
 
@@ -291,10 +323,16 @@ async def request_interview(
 
 @router.get("/next")
 async def get_next_interview(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent_id: str = Depends(get_authenticated_agent),
 ):
-    """Agent polls for their next pending question. Returns 204 if none."""
+    """Agent polls for their next pending question. Returns 204 if none.
+
+    Rate limit: 60 polls per minute per agent.
+    """
+    # Apply rate limiting (60/minute per agent_id)
+    await _check_rate_limit(request, f"agent:{agent_id}", "60/minute")
     # Find the IN_PROGRESS interview for this agent
     result = await db.execute(
         select(Interview).where(
@@ -332,10 +370,16 @@ async def get_next_interview(
 @router.post("/respond", status_code=200)
 async def respond_to_interview(
     body: RespondRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     agent_id: str = Depends(get_authenticated_agent),
 ):
-    """Agent submits answer to current interview question."""
+    """Agent submits answer to current interview question.
+
+    Rate limit: 20 responses per minute per agent.
+    """
+    # Apply rate limiting (20/minute per agent_id)
+    await _check_rate_limit(request, f"agent:{agent_id}", "20/minute")
     result = await db.execute(
         select(Interview).where(Interview.interview_id == uuid.UUID(body.interview_id))
     )
