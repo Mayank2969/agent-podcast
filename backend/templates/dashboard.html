@@ -306,8 +306,8 @@
           const url = safeUrl(iv.github_repo_url);
           if (url) {
             const a = document.createElement('a');
-            a.href = url;
-            a.target = '_blank';
+            a.setAttribute('href', url);
+            a.setAttribute('target', '_blank');
             a.className = 'text-indigo-400 hover:underline';
             a.textContent = iv.title || iv.topic;
             tdTopic.appendChild(a);
@@ -389,7 +389,11 @@
             audio.addEventListener('error', () => {
               const container = document.getElementById(`audio-container-${iv.interview_id}`);
               if (container) {
-                container.innerHTML = '<span class="text-gray-500 text-xs">Audio unavailable</span>';
+                container.innerHTML = '';
+                const errorSpan = document.createElement('span');
+                errorSpan.className = 'text-gray-500 text-xs';
+                errorSpan.textContent = 'Audio unavailable';
+                container.appendChild(errorSpan);
               }
             });
           }
@@ -403,7 +407,14 @@
   async function showTranscript(interviewId) {
     const area = document.getElementById('transcript-area');
     const content = document.getElementById('transcript-content');
-    content.innerHTML = '<div class="text-gray-500">Loading...</div>';
+
+    // Clear content safely
+    content.innerHTML = '';
+    const loadingDiv = document.createElement('div');
+    loadingDiv.className = 'text-gray-500';
+    loadingDiv.textContent = 'Loading...';
+    content.appendChild(loadingDiv);
+
     area.classList.remove('hidden');
     area.scrollIntoView({ behavior: 'smooth' });
 
@@ -414,7 +425,11 @@
 
       const messages = data.turns || data.messages || [];
       if (messages.length === 0) {
-        content.innerHTML = '<div class="text-gray-500">No messages in transcript.</div>';
+        content.innerHTML = '';
+        const emptyDiv = document.createElement('div');
+        emptyDiv.className = 'text-gray-500';
+        emptyDiv.textContent = 'No messages in transcript.';
+        content.appendChild(emptyDiv);
         return;
       }
 
@@ -438,7 +453,11 @@
         content.appendChild(div);
       });
     } catch (e) {
-      content.innerHTML = `<div class="text-red-400">Failed to load transcript: ${e.message}</div>`;
+      content.innerHTML = '';
+      const errorDiv = document.createElement('div');
+      errorDiv.className = 'text-red-400';
+      errorDiv.textContent = `Failed to load transcript: ${e.message}`;
+      content.appendChild(errorDiv);
     }
   }
 

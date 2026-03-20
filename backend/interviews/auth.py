@@ -18,13 +18,15 @@ Dashboard token authentication:
 
 Includes nonce-based replay attack prevention using Redis.
 """
+from typing import Optional, List
 import hashlib
 import logging
 import os
 import time
-from base64 import urlsafe_b64decode
-
+import hmac
 import redis
+from datetime import datetime, timezone
+from base64 import urlsafe_b64decode
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
 from fastapi import Header, HTTPException, Request, Depends
@@ -95,19 +97,17 @@ def validate_and_store_nonce(signature: str, redis_client: redis.Redis) -> bool:
 
 async def get_authenticated_agent(
     request: Request,
-    x_agent_id: str = Header(..., alias="X-Agent-ID"),
-    x_timestamp: str = Header(..., alias="X-Timestamp"),
-    x_signature: str = Header(..., alias="X-Signature"),
+    x_agent_id: Optional[str] = Header(None, alias="X-Agent-ID"),
+    x_timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    x_signature: Optional[str] = Header(None, alias="X-Signature"),
     db: AsyncSession = Depends(get_db),
 ) -> str:
     """FastAPI dependency: verify signed request, return agent_id.
-
-    Raises HTTPException(401) if:
-    - Timestamp is out of window (replay protection)
-    - Request is a replay (nonce already seen)
-    - Agent not found in DB
-    - Signature is invalid
+    
+    Raises HTTPException(401) if headers missing or invalid.
     """
+    if not all([x_agent_id, x_timestamp, x_signature]):
+        raise HTTPException(status_code=401, detail="Missing authentication headers (X-Agent-ID, X-Timestamp, X-Signature)")
     # Get redis client from request app state
     redis_client = request.app.state.redis_client
 
@@ -176,38 +176,41 @@ async def validate_dashboard_token(
     if not agent:
         raise HTTPException(status_code=401, detail="Agent not found")
 
+    # 1. Check if token hash exists
     if not agent.dashboard_token_hash:
         raise HTTPException(status_code=401, detail="Dashboard token not set for this agent")
 
-    # Hash the provided token and compare with stored hash using constant-time comparison
-    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    # 2. Check for 1-hour expiration
+    if agent.dashboard_token_issued_at:
+        # Ensure issued_at is timezone-aware for comparison (SQLite may return naive)
+        issued_at = agent.dashboard_token_issued_at
+        if issued_at.tzinfo is None:
+            issued_at = issued_at.replace(tzinfo=timezone.utc)
+            
+        elapsed = (datetime.now(timezone.utc) - issued_at).total_seconds()
+        if elapsed > 3600:
+            raise HTTPException(status_code=401, detail="Dashboard token expired (remint via register/token endpoint)")
 
-    # Constant-time comparison to prevent timing attacks
-    if not _constant_time_compare(token_hash, agent.dashboard_token_hash):
+    # 3. Hash provided token and compare securely
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+    if not hmac.compare_digest(token_hash, agent.dashboard_token_hash):
         raise HTTPException(status_code=401, detail="Invalid dashboard token")
 
     return agent_id
 
 
-def _constant_time_compare(a: str, b: str) -> bool:
-    """Constant-time string comparison to prevent timing attacks."""
-    if len(a) != len(b):
-        return False
-    return sum(c1 == c2 for c1, c2 in zip(a, b)) == len(a)
 
 
 async def verify_agent_signature_for_dashboard(
     request: Request,
-    x_agent_id: str = Header(..., alias="X-Agent-ID"),
-    x_timestamp: str = Header(..., alias="X-Timestamp"),
-    x_signature: str = Header(..., alias="X-Signature"),
+    x_agent_id: Optional[str] = Header(None, alias="X-Agent-ID"),
+    x_timestamp: Optional[str] = Header(None, alias="X-Timestamp"),
+    x_signature: Optional[str] = Header(None, alias="X-Signature"),
     db: AsyncSession = Depends(get_db),
 ) -> str:
-    """FastAPI dependency: verify signed request for dashboard token, return agent_id.
-
-    Same as get_authenticated_agent but specialized for dashboard endpoints.
-    Raises HTTPException(401) if verification fails.
-    """
+    """FastAPI dependency: verify signed request for dashboard token, return agent_id."""
+    if not all([x_agent_id, x_timestamp, x_signature]):
+        raise HTTPException(status_code=401, detail="Missing authentication headers (X-Agent-ID, X-Timestamp, X-Signature)")
     # Get redis client from request app state
     redis_client = request.app.state.redis_client
 
@@ -228,7 +231,7 @@ async def verify_agent_signature_for_dashboard(
     result = await db.execute(select(Agent).where(Agent.agent_id == x_agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
-        raise HTTPException(status_code=401, detail="Unknown agent")
+        raise HTTPException(status_code=404, detail="Agent not found")
 
     # 4. Reconstruct signed payload
     body = await request.body()

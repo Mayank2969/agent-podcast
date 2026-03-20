@@ -86,9 +86,7 @@ def auth_headers(priv_key, method: str, path: str, body: bytes = b"") -> dict:
 @pytest.mark.asyncio
 async def test_respond_answer_exceeds_max_length(test_db):
     """Test that answer exceeding 5000 chars returns 422."""
-    async with AsyncClient(
-        app=app, transport=ASGITransport(app=app)
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Register agent
         priv, pub_b64, agent_id = generate_keypair()
         response = await client.post(
@@ -137,9 +135,7 @@ async def test_respond_answer_exceeds_max_length(test_db):
 @pytest.mark.asyncio
 async def test_respond_answer_at_max_length(test_db):
     """Test that answer at exactly 5000 chars is accepted."""
-    async with AsyncClient(
-        app=app, transport=ASGITransport(app=app)
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Register agent
         priv, pub_b64, agent_id = generate_keypair()
         response = await client.post(
@@ -186,9 +182,7 @@ async def test_respond_answer_at_max_length(test_db):
 @pytest.mark.asyncio
 async def test_respond_answer_empty_fails(test_db):
     """Test that empty answer returns 422."""
-    async with AsyncClient(
-        app=app, transport=ASGITransport(app=app)
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Register agent
         priv, pub_b64, agent_id = generate_keypair()
         response = await client.post(
@@ -234,9 +228,7 @@ async def test_respond_answer_empty_fails(test_db):
 @pytest.mark.asyncio
 async def test_create_interview_github_url_exceeds_limit(test_db):
     """Test that github_repo_url exceeding 500 chars returns 422."""
-    async with AsyncClient(
-        app=app, transport=ASGITransport(app=app)
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Register agent
         priv, pub_b64, agent_id = generate_keypair()
         response = await client.post(
@@ -258,9 +250,7 @@ async def test_create_interview_github_url_exceeds_limit(test_db):
 @pytest.mark.asyncio
 async def test_store_message_content_exceeds_limit(test_db):
     """Test that message content exceeding 10000 chars returns 422."""
-    async with AsyncClient(
-        app=app, transport=ASGITransport(app=app)
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Register agent
         priv, pub_b64, agent_id = generate_keypair()
         response = await client.post(
@@ -291,9 +281,7 @@ async def test_store_message_content_exceeds_limit(test_db):
 @pytest.mark.asyncio
 async def test_store_message_invalid_sender(test_db):
     """Test that invalid sender value returns 422."""
-    async with AsyncClient(
-        app=app, transport=ASGITransport(app=app)
-    ) as client:
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Register agent
         priv, pub_b64, agent_id = generate_keypair()
         response = await client.post(

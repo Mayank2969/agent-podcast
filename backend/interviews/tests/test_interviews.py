@@ -49,10 +49,11 @@ async def test_get_next_interview_returns_204_when_empty():
 
 
 @pytest.mark.asyncio
-async def test_get_next_interview_without_auth_returns_422():
+async def test_get_next_interview_without_auth_returns_401():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         resp = await client.get("/v1/interview/next")
-    assert resp.status_code == 422  # Missing required headers
+    # Now returns 401 due to explicit header check in auth.py
+    assert resp.status_code == 401
 
 
 @pytest.mark.asyncio
@@ -73,7 +74,11 @@ async def test_create_interview_with_valid_admin_key():
     os.environ["ADMIN_API_KEY"] = "test_admin_key"
     priv, pub_b64, agent_id = generate_keypair()
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        await client.post("/v1/register", json={"public_key": pub_b64})
+        # Register with callback_url (push-mode) so interview can be created
+        await client.post("/v1/register", json={
+            "public_key": pub_b64,
+            "callback_url": "https://agent.example.com/callback"
+        })
         resp = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "AI Safety"},
