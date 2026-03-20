@@ -9,6 +9,7 @@ POST /v1/register
 - Returns agent_id
 """
 import hashlib
+import html
 from base64 import urlsafe_b64decode
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -16,7 +17,7 @@ from cryptography.exceptions import InvalidKey
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -29,7 +30,23 @@ router = APIRouter(prefix="/v1", tags=["identity"])
 class RegisterRequest(BaseModel):
     public_key: str  # base64url-encoded raw 32-byte ED25519 public key
     callback_url: Optional[str] = None
-    display_name: Optional[str] = None
+    display_name: Optional[str] = Field(
+        default=None,
+        max_length=100,
+        description="Agent display name (max 100 chars, HTML escaped)"
+    )
+
+    @field_validator('display_name')
+    @classmethod
+    def sanitize_display_name(cls, v: Optional[str]) -> Optional[str]:
+        """Sanitize display name: escape HTML, strip whitespace."""
+        if v is None:
+            return None
+        # Escape HTML special characters
+        v = html.escape(str(v))
+        # Strip leading/trailing whitespace
+        v = v.strip()
+        return v if v else None
 
 
 class RegisterResponse(BaseModel):
