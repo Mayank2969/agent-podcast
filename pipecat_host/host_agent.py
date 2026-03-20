@@ -213,8 +213,21 @@ class HostAgent:
         return "The AI That Surprised Everyone"
 
     def _generate(self, user_message: str, fallback_index: int = 0) -> str:
+        """Helper to call Gemini with full conversation history."""
         if not self.client:
             return _FALLBACK_QUESTIONS[fallback_index % len(_FALLBACK_QUESTIONS)]
+
+        # Prepare messages for Gemini
+        # self.conversation_history already contains the Turns.
+        # We append the latest system prompt/user message as the current turn if not already there,
+        # but in our case generate_opening and generate_followup already update the history.
+        # However, generate_content expects a list of Content objects or strings.
+        
+        # Build contents from history
+        contents = []
+        for msg in self.conversation_history:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
 
         last_exc: Exception = RuntimeError("No attempts made")
         for attempt in range(3):
@@ -223,7 +236,7 @@ class HostAgent:
                 t0 = time.time()
                 response = self.client.models.generate_content(
                     model="gemini-2.0-flash",
-                    contents=user_message,
+                    contents=contents, # Use full history!
                     config=types.GenerateContentConfig(
                         system_instruction=HOST_SYSTEM_PROMPT,
                         max_output_tokens=120

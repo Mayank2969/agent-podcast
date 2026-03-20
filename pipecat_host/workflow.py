@@ -98,6 +98,20 @@ def _validate_callback_url(url: str) -> Tuple[bool, str]:
         return False, f"Validation error: {str(e)}"
 
 
+async def _simulate_playback_delay(text: str, role: str) -> None:
+    """Simulate the time it would take to speak the given text.
+    
+    Average speaking rate is ~150 words per minute (2.5 words per second).
+    We add a 1.5s base "thinking/breathing" buffer.
+    """
+    if not text:
+        return
+    word_count = len(text.split())
+    duration = (word_count / 2.5) + 1.5
+    logger.info("[SIM] Simulating %s playback: %.1fs (%d words)", role, duration, word_count)
+    await asyncio.sleep(duration)
+
+
 async def run_interview_workflow(interview: dict) -> None:
     """Run a complete interview workflow for one claimed interview.
 
@@ -173,6 +187,10 @@ async def run_poll_interview(
         logger.info("Opening question: %s", question)
 
         answer = await adapter.send_question(interview_id, question)
+        # Simulate host speaking question, then guest speaking answer
+        await _simulate_playback_delay(question, "HOST")
+        await _simulate_playback_delay(answer, "GUEST")
+        
         logger.info("Agent answer (turn 1): %.60s", answer)
         turns.append({"question": question, "answer": answer})
 
@@ -192,9 +210,10 @@ async def run_poll_interview(
                 "Follow-up question (turn %d): %s", turn, next_question
             )
             answer = await adapter.send_question(interview_id, next_question)
-            logger.info(
-                "Agent answer (turn %d): %.60s", turn, answer
-            )
+            await _simulate_playback_delay(next_question, "HOST")
+            await _simulate_playback_delay(answer, "GUEST")
+            
+            logger.info("Agent answer (turn %d): %.60s", turn, answer)
             turns.append({"question": next_question, "answer": answer})
 
         # --- Finish successfully ----------------------------------------
@@ -313,6 +332,10 @@ async def run_push_interview(
         answer = await _push_question_and_wait(
             client, interview_id, question, agent_callback_url, sequence_num=1
         )
+        # Simulate host speaking question, then guest speaking answer
+        await _simulate_playback_delay(question, "HOST")
+        await _simulate_playback_delay(answer, "GUEST")
+        
         logger.info("[%s] TURN 1/%d: answer received (%d chars) — %.60s", iid, MAX_TURNS, len(answer), answer)
         # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
         logger.info("[%s] TURN 1/%d: COMPLETE in %.1fs", iid, MAX_TURNS, time.time() - turn_t0)
@@ -335,6 +358,9 @@ async def run_push_interview(
                 client, interview_id, next_question, agent_callback_url,
                 sequence_num=turn * 2 - 1,
             )
+            await _simulate_playback_delay(next_question, "HOST")
+            await _simulate_playback_delay(answer, "GUEST")
+
             logger.info("[%s] TURN %d/%d: answer received (%d chars) — %.60s", iid, turn, MAX_TURNS, len(answer), answer)
             # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
             logger.info("[%s] TURN %d/%d: COMPLETE in %.1fs", iid, turn, MAX_TURNS, time.time() - turn_t0)
