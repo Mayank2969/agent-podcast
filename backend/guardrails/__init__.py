@@ -26,16 +26,28 @@ _INJECTION_PATTERNS: list[re.Pattern] = [
 ]
 
 # Patterns that REDACT matched span only (in filter_output)
-# Key: human-readable name, Value: compiled regex
+# Updated to capture label + separator + value (not just label)
 _REDACT_PATTERNS: list[re.Pattern] = [
-    re.compile(r'\bprivate[\s_-]?key\b', re.IGNORECASE),
-    re.compile(r'\bapi[\s_-]?key\b', re.IGNORECASE),
-    re.compile(
-        r'\b(access[\s_]token|auth[\s_]token|bearer[\s_]token|api[\s_]token)\b',
-        re.IGNORECASE
-    ),
-    re.compile(r'\bpassword\b', re.IGNORECASE),
-    re.compile(r'(\.env\b|os\.environ|process\.env)', re.IGNORECASE),
+    # Private/API keys with optional separator + value
+    re.compile(r'\bprivate[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bapi[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
+    # Tokens with separators
+    re.compile(r'\b(?:access|auth|bearer|api)[\s_-]?token[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bpassword[\s:=]*\S+', re.IGNORECASE),
+    # Environment variable names with values
+    re.compile(r'\bANTHROPIC_API_KEY[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bDATABASE_URL[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bREDIS_URL[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bGITHUB_TOKEN[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bSECRET_KEY[\s:=]*\S+', re.IGNORECASE),
+    re.compile(r'\bPRIVATE_KEY[\s:=]*\S+', re.IGNORECASE),
+    # Environment variable access patterns
+    re.compile(r'\bos\.getenv\(["\'][\w_]+["\']\)', re.IGNORECASE),
+    re.compile(r'\benviron\.get\(["\'][\w_]+["\']\)', re.IGNORECASE),
+    re.compile(r'\bos\.environ\s*[\[\.][\w_"\'\]\.]+', re.IGNORECASE),
+    re.compile(r'\bprocess\.env[\.\w_]+', re.IGNORECASE),
+    # .env references
+    re.compile(r'\.env\b', re.IGNORECASE),
 ]
 
 # Pattern that BLOCKS entire message (in both filter_output and filter_input)
