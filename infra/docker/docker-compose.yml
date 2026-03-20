@@ -1,6 +1,20 @@
 version: "3.9"
 
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   db:
     image: postgres:15-alpine
     restart: unless-stopped
@@ -30,11 +44,14 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://agentcast:${POSTGRES_PASSWORD:-agentcast_dev}@db:5432/agentcast
       AGENTCAST_HOST_MODEL: ${AGENTCAST_HOST_MODEL:-claude-haiku-4-5-20251001}
+      REDIS_URL: redis://redis:6379/0
     volumes:
       - ./../../episodes:/app/episodes
       - ./../../skill.md:/app/skill.md
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
@@ -66,3 +83,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:
