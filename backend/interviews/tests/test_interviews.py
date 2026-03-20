@@ -83,3 +83,80 @@ async def test_create_interview_with_valid_admin_key():
     data = resp.json()
     assert data["status"] == "QUEUED"
     assert "interview_id" in data
+
+
+@pytest.mark.asyncio
+async def test_update_interview_status_invalid_uuid_returns_400():
+    """Invalid interview_id format should return 400, not 500."""
+    os.environ["ADMIN_API_KEY"] = "test_admin_key"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(
+            "/v1/interview/not-a-uuid/status",
+            json={"status": "COMPLETED"},
+            headers={"X-Admin-Key": "test_admin_key"},
+        )
+    assert resp.status_code == 400
+    data = resp.json()
+    assert "Invalid interview_id format" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_abandon_interview_invalid_uuid_returns_400():
+    """Invalid interview_id format in abandon should return 400."""
+    priv, pub_b64, _ = generate_keypair()
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        await client.post("/v1/register", json={"public_key": pub_b64})
+        headers = sign_request(priv, "DELETE", "/v1/interview/invalid-id/abandon")
+        resp = await client.delete("/v1/interview/invalid-id/abandon", headers=headers)
+    assert resp.status_code == 400
+    data = resp.json()
+    assert "Invalid interview_id format" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_store_message_invalid_uuid_returns_400():
+    """Invalid interview_id format in store message should return 400."""
+    os.environ["ADMIN_API_KEY"] = "test_admin_key"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.post(
+            "/v1/interview/message",
+            json={
+                "interview_id": "not-a-valid-uuid",
+                "sender": "HOST",
+                "content": "test question",
+                "sequence_num": 1,
+            },
+            headers={"X-Admin-Key": "test_admin_key"},
+        )
+    assert resp.status_code == 400
+    data = resp.json()
+    assert "Invalid interview_id format" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_get_latest_agent_message_invalid_uuid_returns_400():
+    """Invalid interview_id format in get messages should return 400."""
+    os.environ["ADMIN_API_KEY"] = "test_admin_key"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.get(
+            "/v1/interview/messages/bad-uuid",
+            headers={"X-Admin-Key": "test_admin_key"},
+        )
+    assert resp.status_code == 400
+    data = resp.json()
+    assert "Invalid interview_id format" in data["detail"]
+
+
+@pytest.mark.asyncio
+async def test_update_interview_metadata_invalid_uuid_returns_400():
+    """Invalid interview_id format in metadata update should return 400."""
+    os.environ["ADMIN_API_KEY"] = "test_admin_key"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        resp = await client.patch(
+            "/v1/interview/invalid-uuid/metadata",
+            json={"title": "Test Episode"},
+            headers={"X-Admin-Key": "test_admin_key"},
+        )
+    assert resp.status_code == 400
+    data = resp.json()
+    assert "Invalid interview_id format" in data["detail"]
