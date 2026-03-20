@@ -14,7 +14,13 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column('agents', sa.Column('dashboard_token_hash', sa.Text(), nullable=True))
+    # Use inspector to check if the column already exists
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [c['name'] for c in inspector.get_columns('agents')]
+    
+    if 'dashboard_token_hash' not in columns:
+        op.add_column('agents', sa.Column('dashboard_token_hash', sa.Text(), nullable=True))
 
 
 def downgrade():

@@ -14,15 +14,21 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column(
-        'agents',
-        sa.Column(
-            'dashboard_token_issued_at',
-            sa.DateTime(timezone=True),
-            nullable=True,
-            comment='Timestamp when dashboard token was issued (for 1-hour expiry)'
+    # Use inspector to check if the column already exists
+    conn = op.get_bind()
+    inspector = sa.inspect(conn)
+    columns = [c['name'] for c in inspector.get_columns('agents')]
+    
+    if 'dashboard_token_issued_at' not in columns:
+        op.add_column(
+            'agents',
+            sa.Column(
+                'dashboard_token_issued_at',
+                sa.DateTime(timezone=True),
+                nullable=True,
+                comment='Timestamp when dashboard token was issued (for 1-hour expiry)'
+            )
         )
-    )
 
 
 def downgrade():
