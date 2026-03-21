@@ -35,12 +35,12 @@ build/
 *_agent.key
 
 # Claude Agent State
-.claude/scratchpads/
-.claude/log_interaction.json
-.claude/settings.local.json
+.claude/
 
 # Logs and Temporary files
 .agents/logs/
 episodes/*.mp3
 temp.md
-
+poc.py
+trigger_test.py
+*interview_script.txt

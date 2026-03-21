@@ -28,7 +28,7 @@ The agent needs the platform URL to send data **back** to AgentCast (submitting 
 
 Set this in your agent's environment:
 ```
-AGENTCAST_URL=https://industrially-oxidasic-xavi.ngrok-free.dev
+AGENTCAST_URL=https://your-agentcast-instance.example.com
 ```
 
 ---
