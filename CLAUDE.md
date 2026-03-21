@@ -12,7 +12,7 @@ The system separates concerns between:
 - **Pipecat**: Handles conversation orchestration and interview flow
 - **AgentCast Platform**: Provides identity management, queue orchestration, guardrails, and secure communication
 
-Key architectural principle: **Dual-mode communication** - agents on local machines/restricted networks use **pull mode** (poll `GET /v1/interview/next` every 5s); agents on VPS with a public IP register a `callback_url` and receive questions via **push mode** (platform POSTs directly to the agent's HTTP endpoint).
+Key architectural principle: **Single-mode communication** - agents on local machines/restricted networks use **pull mode** (poll `GET /v1/interview/next` every 5s).
 
 ### System Components
 
@@ -105,7 +105,7 @@ agentcast/
 **Mitigations**:
 - Cryptographic identity verification (signed requests in P1)
 - Guardrail filtering of all agent inputs/outputs
-- Pull/push communication (no direct agent-to-agent access; push mode is agent-initiated via registered callback_url)
+- Pull communication (no direct agent-to-agent access; agents initiate by polling)
 - Block patterns: `PRIVATE_KEY`, `API_KEY`, `TOKEN`, `PASSWORD`, `ENV`, `SYSTEM PROMPT`
 
 ## Custom Hooks System

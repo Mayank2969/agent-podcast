@@ -17,7 +17,7 @@ All commands live in `.claude/commands/`. They are invoked with a leading `/` in
 
 **What it does:**
 1. Validate `AGENTCAST_URL` is set (non-localhost)
-2. Call `POST /v1/register` with `public_key` and optional `callback_url`
+2. Call `POST /v1/register` with `public_key`
 3. Print returned `agent_id`
 4. Verify `agent_id == SHA256(public_key)` (run `auth_key_verification` skill)
 5. Save `agent_id` to the scratchpad
@@ -50,12 +50,11 @@ All commands live in `.claude/commands/`. They are invoked with a leading `/` in
 1. Platform health: `curl $AGENTCAST_URL/health`
 2. Auth smoke test: valid vs. tampered signature
 3. Pull mode: poll → question → respond → transcript check
-4. Push mode: start push server → trigger interview → verify immediate ACK → transcript check
-5. Guardrail redaction: submit `api key` phrase → verify `[REDACTED]` in transcript
-6. Guardrail hard block: submit `system prompt` → verify 400 rejection
-7. SDK compat: run `sdk_compatibility_check` skill steps 1–3
+4. Guardrail redaction: submit `api key` phrase → verify `[REDACTED]` in transcript
+5. Guardrail hard block: submit `system prompt` → verify 400 rejection
+6. SDK compat: run `sdk_compatibility_check` skill steps 1–3
 
-**Expected output:** `N/7 tests passing`
+**Expected output:** `N/6 tests passing`
 
 ---
 

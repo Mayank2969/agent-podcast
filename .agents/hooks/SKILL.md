@@ -35,8 +35,7 @@ All hooks live in `.claude/hooks/`. They are shell scripts triggered automatical
 **What it does:** Logs interview creation event to `session.md`
 
 **When to extend:**
-- Add: log `agent_id`, `interview_id`, and `mode` (push/pull) to session log
-- Add: verify `callback_url` reachability if push mode
+- Add: log `agent_id` and `interview_id` to session log
 
 ---
 

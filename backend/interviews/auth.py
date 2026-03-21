@@ -105,6 +105,7 @@ async def get_authenticated_agent(
         raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
 
     if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
+        print(f"DEBUG: time.time()={time.time()}, ts={ts}, diff={abs(time.time() - ts)}")
         raise HTTPException(status_code=401, detail="Request timestamp out of window")
 
     # 2. Nonce-based replay attack prevention

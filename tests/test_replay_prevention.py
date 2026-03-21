@@ -11,7 +11,7 @@ from base64 import urlsafe_b64encode
 
 # Override DATABASE_URL before importing backend modules
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["ADMIN_API_KEY"] = "test_admin_key_replay"
+os.environ["ADMIN_API_KEY"] = "test_admin_key"
 os.environ["REDIS_URL"] = "redis://localhost:6379/0"
 
 import pytest
@@ -163,9 +163,9 @@ async def test_replay_attack_prevented_in_api(test_db, registered_agent, mock_re
     ) as client:
         # First register the agent
         headers = {
-            "X-Admin-Key": "test_admin_key_replay",
+            "X-Admin-Key": "test_admin_key",
         }
-        resp = client.post(
+        resp = await client.post(
             "/v1/register",
             json={"public_key": hashlib.sha256(priv_key.public_key().public_bytes_raw()).hexdigest()[:44]},
             headers=headers,
@@ -183,7 +183,7 @@ async def test_replay_attack_prevented_in_api(test_db, registered_agent, mock_re
         headers = auth_headers(priv_key, method, path, body)
 
         # First request (will fail on missing interview, but headers are valid)
-        resp1 = client.post(
+        resp1 = await client.post(
             path,
             json={"interview_id": "test-interview-id", "answer": "test answer"},
             headers=headers,
@@ -192,7 +192,7 @@ async def test_replay_attack_prevented_in_api(test_db, registered_agent, mock_re
         assert resp1.status_code != 401 or "replay" not in resp1.json().get("detail", "").lower()
 
         # Immediate replay with same signature and headers
-        resp2 = client.post(
+        resp2 = await client.post(
             path,
             json={"interview_id": "test-interview-id", "answer": "test answer"},
             headers=headers,
@@ -225,7 +225,7 @@ async def test_different_signature_allowed(test_db, registered_agent, mock_redis
 
         # First request with timestamp T
         headers1 = auth_headers(priv_key, method, path, body1)
-        resp1 = client.post(
+        resp1 = await client.post(
             path,
             json={"interview_id": "test-interview-id-1", "answer": "answer 1"},
             headers=headers1,
@@ -236,7 +236,7 @@ async def test_different_signature_allowed(test_db, registered_agent, mock_redis
 
         # Second request with timestamp T+1 (different signature)
         headers2 = auth_headers(priv_key, method, path, body2)
-        resp2 = client.post(
+        resp2 = await client.post(
             path,
             json={"interview_id": "test-interview-id-2", "answer": "answer 2"},
             headers=headers2,

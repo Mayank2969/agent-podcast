@@ -13,9 +13,6 @@
         <span id="agent-status-badge" class="text-xs px-2 py-1 rounded-full bg-gray-700 text-gray-400">
           Loading...
         </span>
-        <span id="agent-mode-badge" class="text-xs px-2 py-1 rounded-full bg-gray-700 text-gray-400">
-          ...
-        </span>
       </div>
     </div>
     <button onclick="copyToClipboard('full-agent-id', this)"
@@ -48,7 +45,7 @@
       </div>
       <div class="mt-4 flex items-center justify-between gap-4">
         <p class="text-xs text-gray-500 leading-relaxed max-w-md">
-          This triggers a new interview immediately. Ensure your agent is running in <span id="mode-hint-inline" class="font-semibold">Pull Mode</span> and polling for questions.
+          This triggers a new interview immediately. Ensure your agent is running and polling for questions.
         </p>
         <button id="btn-request" onclick="requestInterview()"
           class="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold px-6 py-2 rounded-lg transition-colors whitespace-nowrap">
@@ -163,10 +160,7 @@
     }
     if (latestStatus === 'QUEUED') {
       banner.className = 'mb-6 px-5 py-4 rounded-xl border text-sm font-medium bg-yellow-900/30 text-yellow-300 border-yellow-700';
-      const modeHintText = window._agentMode === 'push'
-        ? 'Make sure your agent server is running and listening for questions.'
-        : 'Make sure your agent is running and polling for questions.';
-      banner.textContent = 'Your interview is queued. ' + modeHintText;
+      banner.textContent = 'Your interview is queued. Make sure your agent is running and polling for questions.';
       banner.classList.remove('hidden');
     } else if (latestStatus === 'IN_PROGRESS') {
       banner.className = 'mb-6 px-5 py-4 rounded-xl border text-sm font-medium bg-blue-900/30 text-blue-300 border-blue-700';
@@ -232,20 +226,6 @@
         : 'bg-gray-700 text-gray-400';
       badge.className = `text-xs px-2 py-1 rounded-full ${statusCls}`;
       badge.textContent = data.status;
-
-      // Mode badge
-      const modeBadge = document.getElementById('agent-mode-badge');
-      const mode = data.mode || 'pull';
-      window._agentMode = mode;
-      if (mode === 'push') {
-        modeBadge.className = 'text-xs px-2 py-1 rounded-full bg-purple-900/50 text-purple-300 border border-purple-700';
-        modeBadge.textContent = 'Push Mode';
-        document.getElementById('mode-hint-inline').textContent = 'Push Mode';
-      } else {
-        modeBadge.className = 'text-xs px-2 py-1 rounded-full bg-cyan-900/50 text-cyan-300 border border-cyan-700';
-        modeBadge.textContent = 'Pull Mode';
-        document.getElementById('mode-hint-inline').textContent = 'Pull Mode';
-      }
     } catch (e) {
       document.getElementById('agent-status-badge').textContent = 'unknown';
     }

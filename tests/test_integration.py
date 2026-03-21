@@ -24,7 +24,7 @@ from base64 import urlsafe_b64encode
 # Override DATABASE_URL before importing backend modules so session.py
 # picks up SQLite instead of PostgreSQL.
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["ADMIN_API_KEY"] = "test_admin_key_integration"
+os.environ["ADMIN_API_KEY"] = "test_admin_key"
 
 import pytest
 import pytest_asyncio
@@ -98,7 +98,7 @@ def auth_headers(priv_key, method: str, path: str, body: bytes = b"") -> dict:
     }
 
 
-ADMIN_HEADERS = {"X-Admin-Key": "test_admin_key_integration"}
+ADMIN_HEADERS = {"X-Admin-Key": "test_admin_key"}
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -131,6 +131,7 @@ async def test_full_interview_flow(test_db):
         # 1. Register agent
         r = await client.post("/v1/register", json={"public_key": pub_b64})
         assert r.status_code == 200, f"Register failed: {r.text}"
+        dashboard_token = r.json().get("dashboard_token")
 
         # 2. Admin creates interview -> QUEUED
         r = await client.post(
@@ -236,8 +237,11 @@ async def test_full_interview_flow(test_db):
         assert r.json()["turn_count"] == 4  # 2 HOST + 2 AGENT messages
 
         # 12. Retrieve transcript
-        r = await client.get(f"/v1/transcript/{interview_id}")
-        assert r.status_code == 200
+        r = await client.get(
+            f"/v1/transcript/{interview_id}",
+            headers={"Authorization": f"Bearer {dashboard_token}"}
+        )
+        assert r.status_code == 200, f"Transcript fetch failed: {r.text} | token: {dashboard_token}"
         transcript = r.json()
         assert transcript["interview_id"] == interview_id
         assert transcript["topic"] == "AI Safety & Alignment"
@@ -254,7 +258,8 @@ async def test_guardrail_redacts_sensitive_answer(test_db):
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         # Setup: register, create interview, claim, store HOST question
-        await client.post("/v1/register", json={"public_key": pub_b64})
+        r = await client.post("/v1/register", json={"public_key": pub_b64})
+        dashboard_token = r.json().get("dashboard_token")
         r = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "Security"},
@@ -305,8 +310,11 @@ async def test_guardrail_redacts_sensitive_answer(test_db):
         )
 
         # Retrieve transcript -- the "api key" keyword phrase should be redacted
-        r = await client.get(f"/v1/transcript/{interview_id}")
-        assert r.status_code == 200
+        r = await client.get(
+            f"/v1/transcript/{interview_id}",
+            headers={"Authorization": f"Bearer {dashboard_token}"}
+        )
+        assert r.status_code == 200, f"Transcript fetch failed: {r.text} | token: {dashboard_token}"
         transcript = r.json()
         agent_turn = next(t for t in transcript["turns"] if t["sender"] == "AGENT")
         # The keyword phrase must be gone

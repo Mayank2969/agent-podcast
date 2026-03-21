@@ -49,7 +49,6 @@ router = APIRouter(prefix="/v1", tags=["identity"])
 
 class RegisterRequest(BaseModel):
     public_key: str = Field(min_length=43, max_length=43, description="base64url-encoded raw 32-byte ED25519 public key")
-    callback_url: Optional[str] = Field(default=None, max_length=500, description="Agent's HTTP callback URL for push mode")
     display_name: Optional[str] = Field(
         default=None,
         max_length=100,
@@ -77,7 +76,6 @@ class RegisterResponse(BaseModel):
 class AgentResponse(BaseModel):
     agent_id: str
     status: str
-    callback_url: Optional[str] = None
 
 
 def _add_padding(b64: str) -> str:
@@ -85,62 +83,7 @@ def _add_padding(b64: str) -> str:
     return b64 + "=" * ((4 - len(b64) % 4) % 4)
 
 
-def validate_callback_url(url: str) -> Tuple[bool, str]:
-    """Validate callback_url is safe for push mode.
 
-    Enforces:
-    - HTTPS only
-    - Hostname resolution succeeds
-    - IP is not in blocked ranges (private, loopback, link-local, etc.)
-
-    Returns:
-        (is_valid, message) where message explains any failure
-    """
-    try:
-        parsed = urlparse(url)
-
-        # Only HTTPS allowed
-        if parsed.scheme != 'https':
-            return False, "Only HTTPS URLs allowed"
-
-        # Must have a hostname
-        hostname = parsed.hostname
-        if not hostname:
-            return False, "Invalid URL format: missing hostname"
-
-        # Try to resolve hostname to IP (skip in TESTING mode)
-        import os as _os
-        if _os.getenv("TESTING"):
-            return True, "OK"  # Skip DNS in test environment
-        try:
-            ip_str = socket.getaddrinfo(hostname, None)[0][4][0]
-            ip = ipaddress.ip_address(ip_str)
-        except socket.gaierror:
-            return False, f"Hostname '{hostname}' does not resolve"
-        except (ValueError, OSError) as e:
-            return False, f"Failed to resolve hostname: {str(e)}"
-
-        # Block private/reserved IP ranges
-        blocked_ranges = [
-            ipaddress.ip_network('10.0.0.0/8'),           # RFC 1918
-            ipaddress.ip_network('172.16.0.0/12'),        # RFC 1918
-            ipaddress.ip_network('192.168.0.0/16'),       # RFC 1918
-            ipaddress.ip_network('127.0.0.0/8'),          # Loopback
-            ipaddress.ip_network('169.254.0.0/16'),       # Link-local
-            ipaddress.ip_network('0.0.0.0/8'),            # Current network
-            ipaddress.ip_network('255.255.255.255/32'),   # Broadcast
-            ipaddress.ip_network('::1/128'),              # IPv6 loopback
-            ipaddress.ip_network('fc00::/7'),             # IPv6 private
-            ipaddress.ip_network('fe80::/10'),            # IPv6 link-local
-        ]
-
-        for blocked_range in blocked_ranges:
-            if ip in blocked_range:
-                return False, f"IP {ip} is in blocked range {blocked_range}"
-
-        return True, "OK"
-    except Exception as e:
-        return False, f"URL validation error: {str(e)}"
 
 
 def _generate_dashboard_token() -> tuple[str, str]:
@@ -150,8 +93,12 @@ def _generate_dashboard_token() -> tuple[str, str]:
         (unhashed_token_base64, hashed_token_hex) - return unhashed to agent, store hashed
     """
     raw_token = secrets.token_bytes(32)  # 256 bits
-    token_base64 = b64encode(raw_token).decode('ascii')
-    token_hash = hashlib.sha256(raw_token).hexdigest()
+    # Use standard base64 but make it URL safe to match the token format 
+    # expected, or just use base64 output as is? 
+    # Actually, dashboard uses base64url encode. Let's match it.
+    from base64 import urlsafe_b64encode
+    token_base64 = urlsafe_b64encode(raw_token).decode('ascii').rstrip("=")
+    token_hash = hashlib.sha256(token_base64.encode('ascii')).hexdigest()
     return token_base64, token_hash
 
 
@@ -176,12 +123,6 @@ async def register_agent(
     client_ip = _extract_client_ip(request)
     await _check_rate_limit(request, client_ip, "100/minute")
 
-    # Validate callback_url if provided
-    if body.callback_url:
-        is_valid, msg = validate_callback_url(body.callback_url)
-        if not is_valid:
-            raise HTTPException(status_code=422, detail=f"Invalid callback_url: {msg}")
-
     # Decode base64url -> raw bytes
     try:
         raw_bytes = urlsafe_b64decode(_add_padding(body.public_key))
@@ -204,9 +145,7 @@ async def register_agent(
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
     existing = result.scalar_one_or_none()
     if existing:
-        # Idempotent re-registration: update callback_url and display_name if provided
-        if body.callback_url is not None:
-            existing.callback_url = body.callback_url
+        # Idempotent re-registration: update display_name if provided
         if body.display_name is not None:
             existing.display_name = body.display_name
         await db.flush()
@@ -226,7 +165,6 @@ async def register_agent(
         agent_id=agent_id,
         public_key=body.public_key,  # store as-received base64url string
         status="active",
-        callback_url=body.callback_url,
         display_name=body.display_name,
         dashboard_token_hash=token_hash,
         dashboard_token_issued_at=datetime.now(timezone.utc),
@@ -243,11 +181,7 @@ async def get_agent(
     db: AsyncSession = Depends(get_db),
     _admin: str = Depends(get_admin),
 ) -> AgentResponse:
-    """Fetch agent record including callback_url. Admin only.
-
-    Used by the Pipecat host to determine whether to use push or pull mode
-    before starting an interview.
-    """
+    """Fetch agent record. Admin only."""
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
@@ -256,5 +190,4 @@ async def get_agent(
     return AgentResponse(
         agent_id=agent.agent_id,
         status=agent.status,
-        callback_url=agent.callback_url,
     )

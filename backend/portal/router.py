@@ -301,12 +301,7 @@ async def get_agent_public(
     db: AsyncSession = Depends(get_db),
     authorization: Optional[str] = Header(default=None),
 ):
-    """Public agent info — no callback_url exposed. Requires dashboard token.
-
-    Token can be provided via:
-    - Query param: ?token=XXX
-    - Authorization header: Bearer XXX
-    """
+    """Public agent info — no callback_url exposed. Requires dashboard token."""
     # Extract token from Authorization header or query param
     token_to_check = token
     if not token_to_check and authorization:
@@ -317,10 +312,15 @@ async def get_agent_public(
     if not token_to_check:
         raise HTTPException(status_code=401, detail="Dashboard token required (use ?token=XXX or Authorization: Bearer XXX)")
 
+    result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
+    agent = result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+
     return {
         "agent_id": agent_id,
         "status": agent.status,
-        "mode": "push" if agent.callback_url else "pull",
+        "mode": "pull",
         "created_at": agent.created_at.isoformat() if agent.created_at else None,
     }
 

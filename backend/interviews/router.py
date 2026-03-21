@@ -112,12 +112,6 @@ async def create_interview(
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found")
 
-    if not agent.callback_url:
-        raise HTTPException(
-            status_code=400,
-            detail="Agent has no callback_url (pull-mode). "
-                   "Pull-mode agents must self-serve via POST /v1/interview/request.",
-        )
 
     # Idempotency: return existing active interview instead of creating a duplicate
     existing_result = await db.execute(

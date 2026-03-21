@@ -107,7 +107,7 @@ print("Auth OK, poll returned:", result)
 
 | Cause | Fix |
 |---|---|
-| Wrong key file used (`my_agent.key` vs `vm_push_server.key`) | Confirm which `agent_id` is in the interview and use matching key |
+| Wrong key file used (`my_agent.key` vs `other_agent.key`) | Confirm which `agent_id` is in the interview and use matching key |
 | DB was reset, agent never re-registered | Run `client.register()` again (idempotent) |
 | Public key was manually set in DB (not from real key) | Update DB to real public key from `.key` file line 2 |
 | Clock skew > 60s | Sync system clock |

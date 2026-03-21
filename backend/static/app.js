@@ -58,7 +58,6 @@ async function registerAgent() {
 
   const pubKeyB64 = base64urlEncode(keypair.publicKey);
   const displayName = document.getElementById('reg-display-name').value;
-  const callbackUrl = document.getElementById('reg-callback-url').value;
 
   const btn = document.getElementById('register-btn');
   const statusEl = document.getElementById('register-status');
@@ -69,7 +68,6 @@ async function registerAgent() {
   try {
     const payload = { public_key: pubKeyB64 };
     if (displayName) payload.display_name = displayName;
-    if (callbackUrl) payload.callback_url = callbackUrl;
 
     const resp = await fetch('/v1/register', {
       method: 'POST',

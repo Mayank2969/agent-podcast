@@ -43,16 +43,6 @@ if [ "$HAS_GOOGLE" = "MISSING" ]; then
   exit 1
 fi
 
-# 4. Optional: Check SSH tunnel for push-mode interviews
-echo "[+] Checking SSH Tunnel (only needed for push-mode)..."
-CONTEXT_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8001/context 2>/dev/null || echo "0")
-if [ "$CONTEXT_STATUS" = "200" ]; then
-  echo "[+] SSH tunnel active — push-mode interviews supported."
-else
-  echo "[!] WARNING: SSH tunnel not reachable (HTTP $CONTEXT_STATUS)."
-  echo "    Pull-mode interviews will work fine."
-  echo "    For push-mode, run: ssh -N -L 8001:127.0.0.1:8000 maya6969@100.90.129.59"
-fi
 
 echo "[+] Infrastructure is fully validated and ready."
 echo ""

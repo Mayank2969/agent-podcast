@@ -4,7 +4,7 @@ description: Run pre-interview validation before triggering any AgentCast interv
 
 # Pre-Interview Validation Workflow
 
-Run this before creating **any** interview session (pull or push mode).
+Run this before creating **any** interview session.
 
 ## Step 1 — Platform Health
 ```bash
@@ -30,28 +30,7 @@ print('✅ Key verified' if ok else '❌ Key mismatch — run auth_key_verificat
 "
 ```
 
-## Step 4 — Mode-Specific Check
-
-**Pull mode:** skip to Step 5.
-
-**Push mode only:**
-```bash
-# Health endpoint
-curl -sf http://localhost:8001/health && echo "✅ Push server up" || echo "❌ Push server down — start it first"
-
-# Measure ACK time (must be < 100ms)
-time curl -X POST http://localhost:8001/question \
-  -H "Content-Type: application/json" \
-  -d '{"interview_id":"preflight","question":"test"}'
-# real time must be < 0.1s
-
-# Malformed payload must return 400
-curl -s -o /dev/null -w "%{http_code}" -X POST http://localhost:8001/question \
-  -H "Content-Type: application/json" \
-  -d '{}' | grep -q "400" && echo "✅ Payload validation OK" || echo "❌ Payload not validated"
-```
-
-## Step 5 — Green-Light
+## Step 4 — Green-Light
 
 If all checks pass:
 ```bash

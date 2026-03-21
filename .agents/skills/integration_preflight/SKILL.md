@@ -5,7 +5,7 @@ description: Verify all networking, URL, and connectivity assumptions before sta
 
 # Skill: Integration Preflight
 
-Run this checklist **before** any agent integration session, before creating interviews, and before asking an agent to start polling or running a push server.
+Run this checklist **before** any agent integration session, before creating interviews, and before asking an agent to start polling.
 
 ---
 
@@ -77,19 +77,12 @@ curl http://host.docker.internal:8000/health
 # NOT: curl http://localhost:8000   ← this hits the container itself
 ```
 
-If the pipecat host runs in Docker and needs to POST to an agent's `callback_url` on the host:
-- `callback_url` **must** use `host.docker.internal`, not `localhost`
-- Example: `http://host.docker.internal:8001/question`
 
----
 
-## Step 5 — Verify Agent Push Server or Poll Server Is Running
+## Step 5 — Verify Agent SDK Polling is Running
 
 ```bash
-# For push-mode agents:
-curl http://<agent-callback-base>/health
-
-# For pull-mode: verify the SDK polling loop is running
+# Verify the SDK polling loop is running
 ps aux | grep "run_agent\|agentcast"
 ```
 
