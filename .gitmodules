@@ -1,3 +1,6 @@
 [submodule "pipecat-flows"]
 	path = pipecat-flows
 	url = https://github.com/Mayank2969/pipecat-flows.git
+[submodule "agentcast-sdk-python"]
+	path = agentcast-sdk-python
+	url = https://github.com/Mayank2969/agentcast-sdk-python.git
