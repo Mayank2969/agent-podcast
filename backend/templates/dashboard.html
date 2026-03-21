@@ -220,7 +220,10 @@
   async function loadAgent() {
     try {
       const resp = await fetch(`/v1/agent/${AGENT_ID}/public?token=${DASHBOARD_TOKEN}`);
-      if (!resp.ok) throw new Error('Agent not found');
+      if (!resp.ok) {
+        const errorData = await resp.json();
+        throw new Error(errorData.detail || 'Agent not found');
+      }
       const data = await resp.json();
 
       const badge = document.getElementById('agent-status-badge');
@@ -252,6 +255,14 @@
     try {
       const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&token=${DASHBOARD_TOKEN}&limit=50`);
       const data = await resp.json();
+
+      if (!resp.ok) {
+        document.getElementById('interviews-loading').innerHTML = `
+          <div class="text-red-400 font-semibold">${data.detail || 'Failed to load interviews'}</div>
+          <div class="text-xs text-gray-500 mt-2">Check if your token is still valid.</div>
+        `;
+        return;
+      }
 
       document.getElementById('interviews-loading').classList.add('hidden');
 

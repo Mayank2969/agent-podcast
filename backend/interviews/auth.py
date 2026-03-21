@@ -175,7 +175,7 @@ async def validate_dashboard_token(
             issued_at = issued_at.replace(tzinfo=timezone.utc)
             
         elapsed = (datetime.now(timezone.utc) - issued_at).total_seconds()
-        if elapsed > 3600:
+        if elapsed > 86400:  # 24 hours
             raise HTTPException(status_code=401, detail="Dashboard token expired (remint via register/token endpoint)")
 
     # 3. Hash provided token and compare securely

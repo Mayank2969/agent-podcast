@@ -228,6 +228,10 @@ class HostAgent:
         for msg in self.conversation_history:
             role = "user" if msg["role"] == "user" else "model"
             contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+        
+        # If the last message in history isn't this user_message, add it
+        if not contents or contents[-1]["parts"][0]["text"] != user_message:
+            contents.append({"role": "user", "parts": [{"text": user_message}]})
 
         last_exc: Exception = RuntimeError("No attempts made")
         for attempt in range(3):
@@ -236,7 +240,7 @@ class HostAgent:
                 t0 = time.time()
                 response = self.client.models.generate_content(
                     model="gemini-2.0-flash",
-                    contents=contents, # Use full history!
+                    contents=contents, 
                     config=types.GenerateContentConfig(
                         system_instruction=HOST_SYSTEM_PROMPT,
                         max_output_tokens=120

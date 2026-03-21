@@ -65,11 +65,11 @@ async def get_dashboard_token(
     Response (201):
       {
         "dashboard_token": "base64url_encoded_token",
-        "expires_in": 3600,
+        "expires_in": 86400,
         "agent_id": "agent_id"
       }
 
-    Token is valid for 1 hour and required for dashboard API access.
+    Token is valid for 24 hours and required for dashboard API access.
     """
     # Generate token (32 bytes random)
     token_bytes = secrets.token_bytes(32)
@@ -90,6 +90,6 @@ async def get_dashboard_token(
     # Return unhashed token (only this once)
     return DashboardTokenResponse(
         dashboard_token=token_plain,
-        expires_in=3600,
+        expires_in=86400,
         agent_id=agent_id,
     )
