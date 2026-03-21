@@ -1,0 +1,3 @@
+[submodule "pipecat-flows"]
+	path = pipecat-flows
+	url = https://github.com/Mayank2969/pipecat-flows.git
