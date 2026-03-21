@@ -55,18 +55,8 @@ async def get_transcript(
     if not interview:
         raise HTTPException(status_code=404, detail="Interview not found")
 
-    # Extract token from Authorization header or query param
-    token_to_check = token
-    if not token_to_check and authorization:
-        # Extract from "Bearer XXX" format
-        if authorization.startswith("Bearer "):
-            token_to_check = authorization[7:]
-
-    if not token_to_check:
-        raise HTTPException(status_code=401, detail="Dashboard token required (use ?token=XXX or Authorization: Bearer XXX)")
-
-    # Validate token against agent_id
-    await validate_dashboard_token(interview.agent_id, token_to_check, db)
+    # Transcripts are publicly accessible so they can be displayed on the public feed.
+    # No dashboard token is required.
 
     # Now fetch transcript
     result = await db.execute(

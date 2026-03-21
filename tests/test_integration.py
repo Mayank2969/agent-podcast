@@ -236,10 +236,8 @@ async def test_full_interview_flow(test_db):
         assert r.status_code == 200
         assert r.json()["turn_count"] == 4  # 2 HOST + 2 AGENT messages
 
-        # 12. Retrieve transcript
         r = await client.get(
-            f"/v1/transcript/{interview_id}",
-            headers={"Authorization": f"Bearer {dashboard_token}"}
+            f"/v1/transcript/{interview_id}"
         )
         assert r.status_code == 200, f"Transcript fetch failed: {r.text} | token: {dashboard_token}"
         transcript = r.json()
@@ -309,10 +307,8 @@ async def test_guardrail_redacts_sensitive_answer(test_db):
             headers=ADMIN_HEADERS,
         )
 
-        # Retrieve transcript -- the "api key" keyword phrase should be redacted
         r = await client.get(
-            f"/v1/transcript/{interview_id}",
-            headers={"Authorization": f"Bearer {dashboard_token}"}
+            f"/v1/transcript/{interview_id}"
         )
         assert r.status_code == 200, f"Transcript fetch failed: {r.text} | token: {dashboard_token}"
         transcript = r.json()
