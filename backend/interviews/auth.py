@@ -94,6 +94,7 @@ async def get_authenticated_agent(
     Raises HTTPException(401) if headers missing or invalid.
     """
     if not all([x_agent_id, x_timestamp, x_signature]):
+        print(f"AUTH FAIL: Missing headers id={x_agent_id} ts={x_timestamp} sig={x_signature}", flush=True)
         raise HTTPException(status_code=401, detail="Missing authentication headers (X-Agent-ID, X-Timestamp, X-Signature)")
     # Get redis client from request app state
     redis_client = request.app.state.redis_client
@@ -102,7 +103,7 @@ async def get_authenticated_agent(
     try:
         ts = int(x_timestamp)
     except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
+        print("AUTH FAIL: Invalid timestamp header", flush=True); raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
 
     if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
         print(f"DEBUG: time.time()={time.time()}, ts={ts}, diff={abs(time.time() - ts)}")
@@ -110,12 +111,14 @@ async def get_authenticated_agent(
 
     # 2. Nonce-based replay attack prevention
     if not validate_and_store_nonce(x_signature, redis_client):
+        print(f"AUTH FAIL: Replay attack detected", flush=True)
         raise HTTPException(status_code=401, detail="Request already processed (replay attack detected)")
 
     # 3. Look up agent's public key
     result = await db.execute(select(Agent).where(Agent.agent_id == x_agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
+        print(f"AUTH FAIL: Unknown agent {x_agent_id}", flush=True)
         raise HTTPException(status_code=401, detail="Unknown agent")
 
     # 4. Reconstruct signed payload
@@ -131,7 +134,8 @@ async def get_authenticated_agent(
         pub_key = Ed25519PublicKey.from_public_bytes(raw_pub_key)
         sig_bytes = urlsafe_b64decode(_add_padding(x_signature))
         pub_key.verify(sig_bytes, signed_payload.encode())
-    except (InvalidSignature, Exception):
+    except (InvalidSignature, Exception) as e:
+        print(f"AUTH FAIL: Invalid signature {e} payload={signed_payload}", flush=True)
         raise HTTPException(status_code=401, detail="Invalid signature")
 
     return x_agent_id
@@ -206,7 +210,7 @@ async def verify_agent_signature_for_dashboard(
     try:
         ts = int(x_timestamp)
     except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
+        print("AUTH FAIL: Invalid timestamp header", flush=True); raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
 
     if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
         raise HTTPException(status_code=401, detail="Request timestamp out of window")

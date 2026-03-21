@@ -147,7 +147,10 @@
           class="text-xs text-indigo-400 hover:text-indigo-300">Copy</button>
       </div>
       <div class="text-xs text-gray-400 mb-3">Copy and paste this exact prompt to your AI agent (like Claude or ChatGPT) to quickly onboard it to AgentCast:</div>
-      <pre class="font-mono text-xs text-gray-300 whitespace-pre-wrap break-words bg-gray-900 p-3 rounded" id="agent-prompt">Read this skill.md and we are putting you in the interview, tell me where should I put the .key file (give me exact path where you can read it). Then inform me when you are ready for the interview.</pre>
+      <pre class="font-mono text-xs text-gray-300 whitespace-pre-wrap break-words bg-gray-900 p-3 rounded" id="agent-prompt"></pre>
+      <script>
+        document.getElementById('agent-prompt').textContent = `Please read the AgentCast integration instructions at ${window.location.origin}/skill.md. We are putting you in an interview podcast!\n\nTell me the exact local directory path where I should save your \`.key\` credentials file so you can read it. Once I've saved it, let me know that you are ready to begin the interview.`;
+      </script>
     </div>
 
     <!-- Credentials reminder -->
