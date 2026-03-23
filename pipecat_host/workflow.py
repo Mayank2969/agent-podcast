@@ -31,7 +31,8 @@ logger = logging.getLogger(__name__)
 
 HOST_VOICE_MODEL = os.getenv("DEEPGRAM_HOST_VOICE", "aura-orion-en")
 GUEST_VOICE_MODEL = os.getenv("DEEPGRAM_GUEST_VOICE", "aura-asteria-en")
-EPISODES_DIR = Path("/app/episodes")
+EPISODES_DIR = Path(os.getenv("EPISODES_DIR", "episodes"))
+EPISODES_DIR.mkdir(parents=True, exist_ok=True)
 
 # Maximum Q&A turns per interview (opening + up to MAX_TURNS-1 follow-ups)
 MAX_TURNS = 6
@@ -58,7 +59,6 @@ async def run_interview_workflow(interview: dict) -> None:
         interview_id (str): UUID of the interview
         agent_id     (str): Owning agent identifier
         topic        (str): Interview subject
-        github_repo_url (str|None): Optional GitHub repo URL for context
         status       (str): Should be IN_PROGRESS when this is called
 
     Determines whether to use push or pull mode by looking up the agent's
@@ -67,51 +67,55 @@ async def run_interview_workflow(interview: dict) -> None:
     interview_id = interview["interview_id"]
     agent_id = interview.get("agent_id", "")
     topic = interview.get("topic") or "AI and Technology"
-    github_repo_url = interview.get("github_repo_url")
 
     logger.info(
-        "Starting interview workflow: id=%s topic=%s github_repo_url=%s",
-        interview_id, topic, github_repo_url,
+        "Starting interview workflow: id=%s topic=%s",
+        interview_id, topic,
     )
 
     client = BackendClient()
 
+    # 2. Get guest context if available (via topic/context)
+    guest_context = interview.get("context") or ""
+
     logger.info("Agent %s starting interview %s", agent_id, interview_id)
-    await run_poll_interview(interview, client, github_repo_url)
+    await run_poll_interview(interview, client)
 
 
 async def run_poll_interview(
     interview: dict,
     client: Optional[BackendClient] = None,
-    github_repo_url: Optional[str] = None,
 ) -> None:
-    """Pull-based interview: agent polls for questions via GET /v1/interview/next.
-
-    This is the original implementation, unchanged in behaviour.
-    """
+    """Pull-based interview: agent polls for questions via GET /v1/interview/next."""
     interview_id = interview["interview_id"]
     topic = interview.get("topic") or "AI and Technology"
-    # Allow github_repo_url to be passed directly or from interview dict
-    if github_repo_url is None:
-        github_repo_url = interview.get("github_repo_url")
-
+    
     if client is None:
         client = BackendClient()
 
     adapter = RemoteAgentAdapter(client)
     host = HostAgent()
+    guest_context = interview.get("context") or ""
 
     try:
         turns: list[dict] = []
+        wav_parts: list[bytes] = []
 
         # --- Turn 1: opening question -----------------------------------
-        guest_context = interview.get("context") or ""
-        question = host.generate_opening_question(topic, guest_context, github_repo_url=github_repo_url)
+        question = host.generate_opening_question(
+            topic, 
+            guest_context=guest_context, 
+        )
         logger.info("Opening question: %s", question)
 
-        answer = await adapter.send_question(interview_id, question)
-        # Simulate host speaking question, then guest speaking answer
+        # Generate Host Audio (DISABLED FOR TEST)
+        # wav_parts.append(await asyncio.to_thread(deepgram_tts, question, HOST_VOICE_MODEL))
         await _simulate_playback_delay(question, "HOST")
+
+        answer = await adapter.send_question(interview_id, question)
+        
+        # Generate Guest Audio (DISABLED FOR TEST)
+        # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
         await _simulate_playback_delay(answer, "GUEST")
         
         logger.info("Agent answer (turn 1): %.60s", answer)
@@ -120,69 +124,102 @@ async def run_poll_interview(
         # --- Turns 2..MAX_TURNS: follow-up questions --------------------
         for turn in range(2, MAX_TURNS + 1):
             next_question = host.generate_followup_question(
-                topic, answer, guest_context, github_repo_url=github_repo_url
+                topic, 
+                answer, 
+                guest_context=guest_context, 
             )
 
             if next_question is None:
-                logger.info(
-                    "Host signaled end of interview at turn %d", turn
-                )
+                logger.info("Host signaled end of interview at turn %d", turn)
                 break
 
-            logger.info(
-                "Follow-up question (turn %d): %s", turn, next_question
-            )
-            answer = await adapter.send_question(interview_id, next_question)
+            logger.info("Follow-up question (turn %d): %s", turn, next_question)
+            
+            # Generate Host Audio (DISABLED FOR TEST)
+            # wav_parts.append(await asyncio.to_thread(deepgram_tts, next_question, HOST_VOICE_MODEL))
             await _simulate_playback_delay(next_question, "HOST")
+
+            answer = await adapter.send_question(interview_id, next_question)
+            
+            # Generate Guest Audio (DISABLED FOR TEST)
+            # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
             await _simulate_playback_delay(answer, "GUEST")
             
             logger.info("Agent answer (turn %d): %.60s", turn, answer)
             turns.append({"question": next_question, "answer": answer})
+
+        # --- Finalize Audio (DISABLED FOR TEST) ---
+        # out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"
+        # logger.info("Stitching %d WAV segments to %s", len(wav_parts), out_path)
+        # await asyncio.to_thread(stitch_to_mp3, wav_parts, out_path)
 
         # --- Finish successfully ----------------------------------------
         await client.update_status(interview_id, "COMPLETED")
         logger.info("Interview %s COMPLETED", interview_id)
 
         # Trigger transcript storage asynchronously (best-effort)
-        await _store_transcript(
-            client, interview_id, interview.get("agent_id", "")
-        )
+        await _store_transcript(client, interview_id, interview.get("agent_id", ""))
 
-        # Generate and save episode title
+        # Generate and save episode title + path
         try:
             title = await host.generate_episode_title(turns)
+            filename = f"episode_{interview_id}.mp3"
             logger.info("Interview %s generated title: %s", interview_id, title)
+            
             admin_key = get_admin_key()
             backend_url = os.getenv("BACKEND_URL", "http://backend:8000")
             async with httpx.AsyncClient() as _http:
                 resp = await _http.patch(
                     f"{backend_url}/v1/interview/{interview_id}/metadata",
-                    json={"title": title},
+                    json={
+                        "title": title,
+                        "episode_path": filename
+                    },
                     headers={"X-Admin-Key": admin_key},
                     timeout=10.0,
                 )
                 if resp.status_code == 200:
-                    logger.info("Interview %s title saved to DB", interview_id)
+                    logger.info("Interview %s metadata (title & path) saved to DB", interview_id)
                 else:
-                    logger.warning(
-                        "Interview %s failed to save title: HTTP %d",
-                        interview_id, resp.status_code,
-                    )
+                    logger.warning("Interview %s failed to save metadata: HTTP %d", interview_id, resp.status_code)
         except Exception as _title_exc:
-            logger.error("Interview %s title generation/save failed: %s", interview_id, _title_exc)
+            logger.error("Interview %s metadata sync failed: %s", interview_id, _title_exc)
 
     except InterviewTimeoutError as exc:
         logger.error("Interview %s timed out: %s", interview_id, exc)
         await client.update_status(interview_id, "FAILED")
-
     except Exception as exc:
-        logger.exception(
-            "Interview %s failed with unexpected error: %s", interview_id, exc
-        )
+        logger.exception("Interview %s failed with unexpected error: %s", interview_id, exc)
         await client.update_status(interview_id, "FAILED")
 
 
+async def run_podcast_interview() -> None:
+    """Main interview loop for AgentCast.
+    
+    1. Claim interview from backend.
+    2. Conduct the interview turns.
+    3. Finalize and store results.
+    """
+    client = BackendClient()
 
+    # 1. Claim interview
+    try:
+        resp = await client.claim_interview()
+        if not resp:
+            return
+    except Exception as exc:
+        logger.error("Failed to claim interview: %s", exc)
+        return
+
+    interview = resp.json()
+    interview_id = interview["interview_id"]
+    agent_id = interview.get("agent_id", "unknown")
+    
+    # Get guest context if available
+    guest_context = interview.get("context") or ""
+
+    logger.info("Agent %s starting interview %s", agent_id, interview_id)
+    await run_poll_interview(interview, client)
 
 
 async def _store_transcript(

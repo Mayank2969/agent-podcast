@@ -11,7 +11,7 @@ import uuid
 from base64 import urlsafe_b64encode
 
 os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-os.environ["ADMIN_API_KEY"] = "test_admin_field_limits"
+os.environ["ADMIN_API_KEY"] = "test_admin"
 
 import pytest
 import pytest_asyncio
@@ -99,7 +99,7 @@ async def test_respond_answer_exceeds_max_length(test_db):
         response = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "Test"},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
         interview_id = response.json()["interview_id"]
@@ -107,7 +107,7 @@ async def test_respond_answer_exceeds_max_length(test_db):
         # Claim interview
         response = await client.get(
             "/v1/interview/claim",
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 200
 
@@ -116,7 +116,7 @@ async def test_respond_answer_exceeds_max_length(test_db):
         response = await client.post(
             "/v1/interview/message",
             json={"interview_id": interview_id, "sender": "HOST", "content": "Test question", "sequence_num": 1},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
 
@@ -125,7 +125,7 @@ async def test_respond_answer_exceeds_max_length(test_db):
         body = json.dumps({"interview_id": interview_id, "answer": oversized_answer}).encode()
         response = await client.post(
             "/v1/interview/respond",
-            json={"interview_id": interview_id, "answer": oversized_answer},
+            content=body,
             headers=auth_headers(priv, "POST", "/v1/interview/respond", body)
         )
         assert response.status_code == 422
@@ -148,7 +148,7 @@ async def test_respond_answer_at_max_length(test_db):
         response = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "Test"},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
         interview_id = response.json()["interview_id"]
@@ -156,7 +156,7 @@ async def test_respond_answer_at_max_length(test_db):
         # Claim interview
         response = await client.get(
             "/v1/interview/claim",
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 200
 
@@ -164,7 +164,7 @@ async def test_respond_answer_at_max_length(test_db):
         response = await client.post(
             "/v1/interview/message",
             json={"interview_id": interview_id, "sender": "HOST", "content": "Test question", "sequence_num": 1},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
 
@@ -173,7 +173,7 @@ async def test_respond_answer_at_max_length(test_db):
         body = json.dumps({"interview_id": interview_id, "answer": max_answer}).encode()
         response = await client.post(
             "/v1/interview/respond",
-            json={"interview_id": interview_id, "answer": max_answer},
+            content=body,
             headers=auth_headers(priv, "POST", "/v1/interview/respond", body)
         )
         assert response.status_code == 200
@@ -195,7 +195,7 @@ async def test_respond_answer_empty_fails(test_db):
         response = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "Test"},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
         interview_id = response.json()["interview_id"]
@@ -203,7 +203,7 @@ async def test_respond_answer_empty_fails(test_db):
         # Claim interview
         response = await client.get(
             "/v1/interview/claim",
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 200
 
@@ -211,7 +211,7 @@ async def test_respond_answer_empty_fails(test_db):
         response = await client.post(
             "/v1/interview/message",
             json={"interview_id": interview_id, "sender": "HOST", "content": "Test question", "sequence_num": 1},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
 
@@ -219,30 +219,8 @@ async def test_respond_answer_empty_fails(test_db):
         body = json.dumps({"interview_id": interview_id, "answer": ""}).encode()
         response = await client.post(
             "/v1/interview/respond",
-            json={"interview_id": interview_id, "answer": ""},
+            content=body,
             headers=auth_headers(priv, "POST", "/v1/interview/respond", body)
-        )
-        assert response.status_code == 422
-
-
-@pytest.mark.asyncio
-async def test_create_interview_github_url_exceeds_limit(test_db):
-    """Test that github_repo_url exceeding 500 chars returns 422."""
-    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        # Register agent
-        priv, pub_b64, agent_id = generate_keypair()
-        response = await client.post(
-            "/v1/register",
-            json={"public_key": pub_b64}
-        )
-        assert response.status_code == 200
-
-        # Try to create interview with oversized github_repo_url
-        oversized_url = "https://github.com/" + ("a" * 500)
-        response = await client.post(
-            "/v1/interview/create",
-            json={"agent_id": agent_id, "topic": "Test", "github_repo_url": oversized_url},
-            headers={"X-API-Key": "test_admin_field_limits"}
         )
         assert response.status_code == 422
 
@@ -263,7 +241,7 @@ async def test_store_message_content_exceeds_limit(test_db):
         response = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "Test"},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
         interview_id = response.json()["interview_id"]
@@ -273,7 +251,7 @@ async def test_store_message_content_exceeds_limit(test_db):
         response = await client.post(
             "/v1/interview/message",
             json={"interview_id": interview_id, "sender": "HOST", "content": oversized_content, "sequence_num": 1},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 422
 
@@ -294,7 +272,7 @@ async def test_store_message_invalid_sender(test_db):
         response = await client.post(
             "/v1/interview/create",
             json={"agent_id": agent_id, "topic": "Test"},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 201
         interview_id = response.json()["interview_id"]
@@ -303,6 +281,6 @@ async def test_store_message_invalid_sender(test_db):
         response = await client.post(
             "/v1/interview/message",
             json={"interview_id": interview_id, "sender": "INVALID", "content": "Test", "sequence_num": 1},
-            headers={"X-API-Key": "test_admin_field_limits"}
+            headers={"X-Admin-Key": "test_admin"}
         )
         assert response.status_code == 422

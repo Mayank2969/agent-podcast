@@ -44,7 +44,7 @@ async def test_self_serve_flow():
         assert reg_resp.status_code == 200
         
         # 2. Request Interview (Self-Serve)
-        body = b'{"github_repo_url": "https://github.com/test/repo"}'
+        body = b'{"context": "I am a test agent."}'
         headers = sign_request(priv, "POST", "/v1/interview/request", body)
         headers["Content-Type"] = "application/json"
         
@@ -68,7 +68,7 @@ async def test_self_serve_flow():
         assert claim_data["interview_id"] == interview_id
         assert claim_data["agent_id"] == agent_id
         assert claim_data["status"] == "IN_PROGRESS"
-        assert claim_data["github_repo_url"] == "https://github.com/test/repo"
+        assert claim_data["context"] == "I am a test agent."
 
         # 5. Verify no more queued
         claim_resp_empty = await client.get("/v1/interview/claim", headers={"X-Admin-Key": "test_admin"})

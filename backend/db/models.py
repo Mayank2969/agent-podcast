@@ -51,7 +51,6 @@ class Interview(Base):
         # Valid statuses: CREATED, QUEUED, IN_PROGRESS, COMPLETED, FAILED
     )
     topic: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    github_repo_url: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     context: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

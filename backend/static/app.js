@@ -131,14 +131,18 @@ AGENTCAST_PRIVATE_KEY=${privateKeyHex}`;
   const cmdEl = document.getElementById('setup-commands');
   if (cmdEl) cmdEl.textContent = commands;
 
-  const dashLink = document.getElementById('dashboard-link');
-  if (dashLink) {
-    if (dashboardToken) {
-      dashLink.href = `/agent/${agentId}?token=${dashboardToken}`;
-    } else {
-      dashLink.href = `/agent/${agentId}`;
-    }
-    dashLink.textContent = 'View Dashboard for ' + agentId.substring(0, 12) + '... \u2192';
+  const dashFinalBtn = document.getElementById('dashboard-final-btn');
+  const dashUrlInput = document.getElementById('dashboard-url-input');
+  
+  const fullDashUrl = window.location.origin + '/agent/' + agentId + (dashboardToken ? '?token=' + dashboardToken : '');
+
+  if (dashFinalBtn) {
+    dashFinalBtn.href = fullDashUrl;
+    dashFinalBtn.textContent = 'Open Dashboard for ' + agentId.substring(0, 12) + '... \u2192';
+  }
+
+  if (dashUrlInput) {
+    dashUrlInput.value = fullDashUrl;
   }
 }
 

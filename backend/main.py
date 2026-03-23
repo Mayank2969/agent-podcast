@@ -114,12 +114,14 @@ app.add_middleware(
 os.makedirs(_STATIC_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
-# Serve episode MP3 files — wrapped in try/except for local dev without Docker
+# Serve episode MP3 files
+episodes_dir = os.getenv("EPISODES_DIR", "/app/episodes")
+os.makedirs(episodes_dir, exist_ok=True)
 try:
-    app.mount("/episodes", StaticFiles(directory="/app/episodes"), name="episodes")
-except RuntimeError:
-    # Directory does not exist (local dev without Docker) — skip mount
-    pass
+    app.mount("/episodes", StaticFiles(directory=episodes_dir), name="episodes")
+    logger.info(f"Mounted /episodes from {episodes_dir}")
+except Exception as e:
+    logger.error(f"Failed to mount /episodes from {episodes_dir}: {e}")
 
 app.include_router(identity_router)
 app.include_router(interviews_router)

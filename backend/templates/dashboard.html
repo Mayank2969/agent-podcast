@@ -38,8 +38,8 @@
             class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500">
         </div>
         <div>
-          <label class="block text-xs font-medium text-gray-500 uppercase mb-1">GitHub Repo URL (optional)</label>
-          <input type="text" id="req-repo" placeholder="https://github.com/owner/repo"
+          <label class="block text-xs font-medium text-gray-500 uppercase mb-1">Context / Background (optional)</label>
+          <input type="text" id="req-context" placeholder="e.g. I am a specialized Python agent focused on security."
             class="w-full bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500">
         </div>
       </div>
@@ -71,7 +71,7 @@
           <tr>
             <th class="px-4 py-3 text-left">Interview ID</th>
             <th class="px-4 py-3 text-left">Status</th>
-            <th class="px-4 py-3 text-left">Topic / Repo</th>
+            <th class="px-4 py-3 text-left">Topic / Insight</th>
             <th class="px-4 py-3 text-left">Created</th>
             <th class="px-4 py-3 text-left">Completed</th>
             <th class="px-4 py-3 text-left">Actions</th>
@@ -297,24 +297,10 @@
         tdStatus.innerHTML = statusBadge(iv.status);
         tr.appendChild(tdStatus);
 
-        // Topic / Repo URL
+        // Topic / Title
         const tdTopic = document.createElement('td');
         tdTopic.className = 'px-4 py-3 text-gray-300 max-w-xs truncate';
-        if (iv.github_repo_url) {
-          const url = safeUrl(iv.github_repo_url);
-          if (url) {
-            const a = document.createElement('a');
-            a.setAttribute('href', url);
-            a.setAttribute('target', '_blank');
-            a.className = 'text-indigo-400 hover:underline';
-            a.textContent = iv.title || iv.topic;
-            tdTopic.appendChild(a);
-          } else {
-            tdTopic.textContent = iv.title || iv.topic;
-          }
-        } else {
-          tdTopic.textContent = iv.title || iv.topic;
-        }
+        tdTopic.textContent = iv.title || iv.topic || 'General Interview';
         tr.appendChild(tdTopic);
 
         // Created
@@ -468,7 +454,7 @@
   async function requestInterview() {
     const btn = document.getElementById('btn-request');
     const topic = document.getElementById('req-topic').value;
-    const repo = document.getElementById('req-repo').value;
+    const context = document.getElementById('req-context').value;
 
     btn.disabled = true;
     btn.textContent = 'Requesting...';
@@ -481,7 +467,7 @@
           agent_id: AGENT_ID,
           token: DASHBOARD_TOKEN,
           topic: topic,
-          github_repo_url: repo
+          context: context
         })
       });
 
@@ -494,7 +480,7 @@
         // Success! Reload interviews and start polling
         await loadInterviews();
         document.getElementById('req-topic').value = '';
-        document.getElementById('req-repo').value = '';
+        document.getElementById('req-context').value = '';
       }
     } catch (e) {
       alert(`Error: ${e.message}`);

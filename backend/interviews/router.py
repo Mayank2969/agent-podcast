@@ -52,7 +52,7 @@ router = APIRouter(prefix="/v1/interview", tags=["interviews"])
 class CreateInterviewRequest(BaseModel):
     agent_id: str
     topic: str = Field(max_length=200, description="Interview topic")
-    github_repo_url: Optional[str] = Field(default=None, max_length=500, description="GitHub repo URL")
+    context: Optional[str] = Field(default=None, max_length=10000, description="Interview context")
 
 
 class CreateInterviewResponse(BaseModel):
@@ -63,7 +63,6 @@ class CreateInterviewResponse(BaseModel):
 class NextInterviewResponse(BaseModel):
     interview_id: str
     question: str = Field(max_length=5000, description="Interview question")
-    github_repo_url: Optional[str] = Field(default=None, max_length=500, description="GitHub repo URL")
 
 
 class RespondRequest(BaseModel):
@@ -75,7 +74,6 @@ class ClaimInterviewResponse(BaseModel):
     interview_id: str
     agent_id: str
     topic: Optional[str] = Field(default=None, max_length=200, description="Interview topic")
-    github_repo_url: Optional[str] = Field(default=None, max_length=500, description="GitHub repo URL")
     context: Optional[str] = Field(default=None, max_length=10000, description="Interview context")
     status: str
 
@@ -134,7 +132,7 @@ async def create_interview(
         agent_id=body.agent_id,
         status="QUEUED",
         topic=body.topic,
-        github_repo_url=body.github_repo_url,
+        context=body.context,
     )
     db.add(interview)
     await db.flush()
@@ -197,7 +195,6 @@ async def claim_interview(
         interview_id=str(interview.interview_id),
         agent_id=interview.agent_id,
         topic=interview.topic,
-        github_repo_url=interview.github_repo_url,
         context=interview.context,
         status="IN_PROGRESS",
     )
@@ -253,7 +250,7 @@ async def request_interview(
     """Agent requests to be interviewed. Authenticated via ED25519 signature.
 
     Idempotent: returns existing interview if agent already has one QUEUED or IN_PROGRESS.
-    Body: {"github_repo_url": "https://..."} — optional
+    Body: {"context": "..."} — optional
     """
     # Verify agent exists (get_authenticated_agent already checks, but be explicit for 404 vs 401)
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
@@ -282,14 +279,12 @@ async def request_interview(
             },
         )
 
-    github_repo_url = body.get("github_repo_url") if isinstance(body, dict) else None
     context = body.get("context") if isinstance(body, dict) else None
 
     interview = Interview(
         interview_id=uuid.uuid4(),
         agent_id=agent_id,
         status="QUEUED",
-        github_repo_url=github_repo_url,
         context=context,
     )
     db.add(interview)
@@ -344,7 +339,6 @@ async def get_next_interview(
     return NextInterviewResponse(
         interview_id=str(interview.interview_id),
         question=last_msg.content,
-        github_repo_url=interview.github_repo_url,
     )
 
 

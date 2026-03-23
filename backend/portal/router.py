@@ -40,7 +40,7 @@ class RequestInterviewDashboard(BaseModel):
     agent_id: str
     token: str
     topic: Optional[str] = None
-    github_repo_url: Optional[str] = None
+    context: Optional[str] = None
 
 
 # ── API endpoints ─────────────────────────────────────────────────────────────
@@ -100,18 +100,15 @@ async def list_interviews(
         transcript_set = {row[0] for row in t_result.all()}
 
     def _topic(interview: Interview) -> str:
-        if interview.github_repo_url:
-            # Extract repo name from URL e.g. https://github.com/owner/repo -> repo
-            parts = interview.github_repo_url.rstrip("/").split("/")
-            return parts[-1] if parts else interview.github_repo_url
-        return "General Interview"
+        return interview.topic or "General Interview"
 
     items = []
     for i in interviews:
         # Validate episode file exists and has valid size
         episode_path = i.episode_path
         if episode_path:
-            ep_file = Path("/app/episodes") / episode_path
+            episodes_root = Path(os.getenv("EPISODES_DIR", "/app/episodes"))
+            ep_file = episodes_root / episode_path
             if not ep_file.exists() or ep_file.stat().st_size < 1000:
                 episode_path = None  # Mark as unavailable
 
@@ -119,7 +116,6 @@ async def list_interviews(
             "interview_id": str(i.interview_id),
             "status": i.status,
             "topic": _topic(i),
-            "github_repo_url": i.github_repo_url,
             "created_at": i.created_at.isoformat() if i.created_at else None,
             "completed_at": i.completed_at.isoformat() if i.completed_at else None,
             "has_transcript": i.interview_id in transcript_set,
@@ -197,9 +193,6 @@ async def get_feed(
     def _topic(interview: Interview) -> str:
         if interview.topic:
             return interview.topic
-        if interview.github_repo_url:
-            parts = interview.github_repo_url.rstrip("/").split("/")
-            return parts[-1] if parts else interview.github_repo_url
         return "General Interview"
 
     episodes = []
@@ -207,7 +200,8 @@ async def get_feed(
         # Validate episode file exists and has valid size
         episode_path = i.episode_path
         if episode_path:
-            ep_file = Path("/app/episodes") / episode_path
+            episodes_root = Path(os.getenv("EPISODES_DIR", "/app/episodes"))
+            ep_file = episodes_root / episode_path
             if not ep_file.exists() or ep_file.stat().st_size < 1000:
                 episode_path = None  # Mark as unavailable
 
@@ -276,7 +270,7 @@ async def list_agents(
             latest_interviews[iv.agent_id] = {
                 "interview_id": str(iv.interview_id),
                 "status": iv.status,
-                "github_repo_url": iv.github_repo_url,
+                "context": iv.context,
             }
 
     items = [
@@ -356,7 +350,7 @@ async def dashboard_request_interview(
         agent_id=body.agent_id,
         status="QUEUED",
         topic=body.topic or "Web Dashboard Request",
-        github_repo_url=body.github_repo_url,
+        context=body.context,
     )
     db.add(interview)
     await db.commit()
