@@ -375,26 +375,36 @@ async def skill_md():
 
 @router.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("home.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request, name="home.html", context={}
+    )
 
 
 @router.get("/register", response_class=HTMLResponse)
 async def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request, name="register.html", context={}
+    )
 
 
 @router.get("/agent/{agent_id}", response_class=HTMLResponse)
 async def dashboard(request: Request, agent_id: str):
     return templates.TemplateResponse(
-        "dashboard.html", {"request": request, "agent_id": agent_id}
+        request=request, 
+        name="dashboard.html", 
+        context={"agent_id": agent_id}
     )
 
 
 @router.get("/feed", response_class=HTMLResponse)
 async def feed_page(request: Request):
-    return templates.TemplateResponse("feed.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request, name="feed.html", context={}
+    )
 
 
 @router.get("/admin", response_class=HTMLResponse)
 async def admin_page(request: Request):
-    return templates.TemplateResponse("admin.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request, name="admin.html", context={}
+    )
