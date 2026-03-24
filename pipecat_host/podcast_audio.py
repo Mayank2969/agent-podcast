@@ -10,10 +10,70 @@ import httpx
 logger = logging.getLogger(__name__)
 
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_TTS_API_KEY", "")
+CARTESIA_API_KEY = os.getenv("CARTESIA_API_KEY", "")
 SAMPLE_RATE = 24000  # Deepgram linear16 requires 8000/16000/24000/32000/48000
 
+# Cartesia generic voice IDs for fallback if Deepgram fails
+CARTESIA_DEFAULT_HOST_VOICE = "694f9389-aac1-45b6-b726-9d9369183238"  # Generic Male
+CARTESIA_DEFAULT_GUEST_VOICE = "a0e99841-438c-4a64-b6a9-ae8f1b135182"  # Generic Female
 
-def deepgram_tts(text: str, voice_model: str) -> bytes:
+def cartesia_tts(text: str, voice_model: str) -> bytes:
+    """Synthesize speech via Cartesia API and return raw WAV bytes. Retries 3x."""
+    # Try to heuristically map voice or use default
+    voice_id = CARTESIA_DEFAULT_GUEST_VOICE if "asteria" in voice_model.lower() else CARTESIA_DEFAULT_HOST_VOICE
+    t0 = time.time()
+    logger.info("Cartesia TTS %-18s | %d chars", voice_id, len(text))
+    last_exc: Exception = RuntimeError("No attempts made")
+    for attempt in range(3):
+        try:
+            response = httpx.post(
+                "https://api.cartesia.ai/tts/bytes",
+                headers={
+                    "X-API-Key": CARTESIA_API_KEY,
+                    "Cartesia-Version": "2024-06-10",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model_id": "sonic-english",
+                    "transcript": text,
+                    "voice": {"mode": "id", "id": voice_id},
+                    "output_format": {
+                        "container": "wav",
+                        "encoding": "pcm_s16le",
+                        "sample_rate": SAMPLE_RATE
+                    }
+                },
+                timeout=60.0,
+            )
+            response.raise_for_status()
+            elapsed = time.time() - t0
+            logger.info("Cartesia TTS done in %.1fs (%s bytes)", elapsed, f"{len(response.content):,}")
+            return response.content
+        except Exception as exc:
+            last_exc = exc
+            if attempt < 2:
+                wait = 2 ** (attempt + 1)
+                logger.warning("Cartesia TTS attempt %d/3 failed (%s), retrying in %ds...", attempt + 1, exc, wait)
+                time.sleep(wait)
+    raise last_exc
+
+def generate_speech(text: str, voice_model: str) -> bytes:
+    """Synthesize speech using Deepgram, with fallback to Cartesia."""
+    try:
+        if DEEPGRAM_API_KEY:
+            return _deepgram_tts(text, voice_model)
+        else:
+            logger.warning("DEEPGRAM_TTS_API_KEY not set, skipping Deepgram.")
+            raise ValueError("No Deepgram key")
+    except Exception as e:
+        logger.warning(f"Deepgram TTS failed or unavailable: {e}. Falling back to Cartesia.")
+        if CARTESIA_API_KEY:
+            return cartesia_tts(text, voice_model)
+        else:
+            logger.error("No CARTESIA_API_KEY set for fallback.")
+            raise
+
+def _deepgram_tts(text: str, voice_model: str) -> bytes:
     """Synthesize speech via Deepgram Aura API and return raw WAV bytes. Retries 3x."""
     t0 = time.time()
     logger.info("TTS %-18s | %d chars", voice_model, len(text))

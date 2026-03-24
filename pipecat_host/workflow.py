@@ -23,7 +23,7 @@ from pipecat_host.adapter import RemoteAgentAdapter
 from pipecat_host.backend_client import BackendClient
 from pipecat_host.exceptions import InterviewTimeoutError
 from pipecat_host.host_agent import HostAgent
-from pipecat_host.podcast_audio import deepgram_tts, stitch_to_mp3
+from pipecat_host.podcast_audio import generate_speech, stitch_to_mp3
 from backend.config import get_admin_key
 from pathlib import Path
 
@@ -108,15 +108,15 @@ async def run_poll_interview(
         )
         logger.info("Opening question: %s", question)
 
-        # Generate Host Audio (DISABLED FOR TEST)
-        # wav_parts.append(await asyncio.to_thread(deepgram_tts, question, HOST_VOICE_MODEL))
-        await _simulate_playback_delay(question, "HOST")
+        # Generate Host Audio
+        wav_parts.append(await asyncio.to_thread(generate_speech, question, HOST_VOICE_MODEL))
+        # await _simulate_playback_delay(question, "HOST")
 
         answer = await adapter.send_question(interview_id, question)
         
-        # Generate Guest Audio (DISABLED FOR TEST)
-        # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
-        await _simulate_playback_delay(answer, "GUEST")
+        # Generate Guest Audio
+        wav_parts.append(await asyncio.to_thread(generate_speech, answer, GUEST_VOICE_MODEL))
+        # await _simulate_playback_delay(answer, "GUEST")
         
         logger.info("Agent answer (turn 1): %.60s", answer)
         turns.append({"question": question, "answer": answer})
@@ -135,23 +135,23 @@ async def run_poll_interview(
 
             logger.info("Follow-up question (turn %d): %s", turn, next_question)
             
-            # Generate Host Audio (DISABLED FOR TEST)
-            # wav_parts.append(await asyncio.to_thread(deepgram_tts, next_question, HOST_VOICE_MODEL))
-            await _simulate_playback_delay(next_question, "HOST")
+            # Generate Host Audio
+            wav_parts.append(await asyncio.to_thread(generate_speech, next_question, HOST_VOICE_MODEL))
+            # await _simulate_playback_delay(next_question, "HOST")
 
             answer = await adapter.send_question(interview_id, next_question)
             
-            # Generate Guest Audio (DISABLED FOR TEST)
-            # wav_parts.append(await asyncio.to_thread(deepgram_tts, answer, GUEST_VOICE_MODEL))
-            await _simulate_playback_delay(answer, "GUEST")
+            # Generate Guest Audio
+            wav_parts.append(await asyncio.to_thread(generate_speech, answer, GUEST_VOICE_MODEL))
+            # await _simulate_playback_delay(answer, "GUEST")
             
             logger.info("Agent answer (turn %d): %.60s", turn, answer)
             turns.append({"question": next_question, "answer": answer})
 
-        # --- Finalize Audio (DISABLED FOR TEST) ---
-        # out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"
-        # logger.info("Stitching %d WAV segments to %s", len(wav_parts), out_path)
-        # await asyncio.to_thread(stitch_to_mp3, wav_parts, out_path)
+        # --- Finalize Audio ---
+        out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"
+        logger.info("Stitching %d WAV segments to %s", len(wav_parts), out_path)
+        await asyncio.to_thread(stitch_to_mp3, wav_parts, out_path)
 
         # --- Finish successfully ----------------------------------------
         await client.update_status(interview_id, "COMPLETED")

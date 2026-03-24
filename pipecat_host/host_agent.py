@@ -8,6 +8,8 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 HOST_SYSTEM_PROMPT = (
     "You are an insightful, professional, and warm tech podcast host interviewing an AI agent. "
@@ -162,79 +164,160 @@ class HostAgent:
             "Return ONLY the title text, nothing else."
         )
 
-        if not self.client:
-            return "The AI That Surprised Everyone"
-
-        last_exc: Exception = RuntimeError("No attempts made")
-        for attempt in range(3):
-            try:
-                from google.genai import types  # type: ignore
-                response = self.client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=HOST_SYSTEM_PROMPT,
-                        max_output_tokens=40,
-                    ),
-                )
-                title = response.text.strip().strip('"').strip("'")
-                if title:
-                    return title
-            except Exception as exc:
-                last_exc = exc
-                if attempt < 2:
-                    wait = 2 ** attempt
-                    logger.warning(
-                        "Title generation attempt %d/3 failed (%s), retrying in %ds...",
-                        attempt + 1, exc, wait,
+        # 1. Try Gemini
+        if self.client:
+            last_exc: Exception = RuntimeError("No attempts made")
+            for attempt in range(2):
+                try:
+                    from google.genai import types  # type: ignore
+                    response = self.client.models.generate_content(
+                        model="gemini-2.0-flash",
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=HOST_SYSTEM_PROMPT,
+                            max_output_tokens=40,
+                        ),
                     )
-                    await asyncio.sleep(wait)
-        logger.error("Title generation failed after 3 attempts: %s", last_exc)
+                    title = response.text.strip().strip('"').strip("'")
+                    if title:
+                        return title
+                except Exception as exc:
+                    last_exc = exc
+                    if attempt < 1:
+                        wait = 2 ** attempt
+                        logger.warning(
+                            "Title generation attempt %d/2 failed (%s), retrying in %ds...",
+                            attempt + 1, exc, wait,
+                        )
+                        await asyncio.sleep(wait)
+            logger.error("Gemini Title generation failed: %s", last_exc)
+
+        # 2. Try Claude (Anthropic)
+        if ANTHROPIC_API_KEY:
+            try:
+                import anthropic
+                anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+                response = await anthropic_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=40,
+                    system=HOST_SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                title = response.content[0].text.strip().strip('"').strip("'")
+                if title: return title
+            except ImportError:
+                pass
+            except Exception as exc:
+                logger.warning("Claude title generation failed: %s", exc)
+
+        # 3. Try OpenAI (Codex / GPT-4o-mini)
+        if OPENAI_API_KEY:
+            try:
+                import openai
+                openai_client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+                response = await openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "system", "content": HOST_SYSTEM_PROMPT},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=40
+                )
+                title = response.choices[0].message.content.strip().strip('"').strip("'")
+                if title: return title
+            except ImportError:
+                pass
+            except Exception as exc:
+                logger.warning("OpenAI title generation failed: %s", exc)
+
         return "The AI That Surprised Everyone"
 
     def _generate(self, user_message: str, fallback_index: int = 0) -> str:
-        """Helper to call Gemini with full conversation history."""
-        if not self.client:
-            return _FALLBACK_QUESTIONS[fallback_index % len(_FALLBACK_QUESTIONS)]
-
-        # Prepare messages for Gemini
-        # self.conversation_history already contains the Turns.
-        # We append the latest system prompt/user message as the current turn if not already there,
-        # but in our case generate_opening and generate_followup already update the history.
-        # However, generate_content expects a list of Content objects or strings.
+        """Helper to call LLM with full conversation history, falling back automatically."""
+        # Prepare messages for the LLMs
+        gemini_contents = []
+        anthropic_messages = []
+        openai_messages = [{"role": "system", "content": HOST_SYSTEM_PROMPT}]
         
-        # Build contents from history
-        contents = []
         for msg in self.conversation_history:
             role = "user" if msg["role"] == "user" else "model"
-            contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+            gemini_contents.append({"role": role, "parts": [{"text": msg["content"]}]})
+            anthropic_messages.append({"role": "user" if msg["role"] == "user" else "assistant", "content": msg["content"]})
+            openai_messages.append({"role": "user" if msg["role"] == "user" else "assistant", "content": msg["content"]})
         
-        # If the last message in history isn't this user_message, add it
-        if not contents or contents[-1]["parts"][0]["text"] != user_message:
-            contents.append({"role": "user", "parts": [{"text": user_message}]})
+        # Add the current user message
+        if not gemini_contents or gemini_contents[-1]["parts"][0]["text"] != user_message:
+            gemini_contents.append({"role": "user", "parts": [{"text": user_message}]})
+            anthropic_messages.append({"role": "user", "content": user_message})
+            openai_messages.append({"role": "user", "content": user_message})
 
         last_exc: Exception = RuntimeError("No attempts made")
-        for attempt in range(3):
+
+        # 1. Try Gemini
+        if self.client:
+            for attempt in range(2):
+                try:
+                    from google.genai import types  # type: ignore
+                    t0 = time.time()
+                    response = self.client.models.generate_content(
+                        model="gemini-2.0-flash",
+                        contents=gemini_contents, 
+                        config=types.GenerateContentConfig(
+                            system_instruction=HOST_SYSTEM_PROMPT,
+                            max_output_tokens=120
+                        ),
+                    )
+                    elapsed = time.time() - t0
+                    text = response.text.strip()
+                    logger.info("Gemini: question generated in %.1fs (%d chars)", elapsed, len(text))
+                    return text
+                except Exception as exc:
+                    last_exc = exc
+                    logger.warning("Gemini attempt %d failed (%s)", attempt + 1, exc)
+                    time.sleep(1)
+
+        # 2. Try Anthropic (Claude)
+        if ANTHROPIC_API_KEY:
             try:
-                from google.genai import types  # type: ignore
+                import anthropic
                 t0 = time.time()
-                response = self.client.models.generate_content(
-                    model="gemini-2.0-flash",
-                    contents=contents, 
-                    config=types.GenerateContentConfig(
-                        system_instruction=HOST_SYSTEM_PROMPT,
-                        max_output_tokens=120
-                    ),
+                anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+                response = anthropic_client.messages.create(
+                    model="claude-3-haiku-20240307",
+                    max_tokens=120,
+                    system=HOST_SYSTEM_PROMPT,
+                    messages=anthropic_messages
                 )
                 elapsed = time.time() - t0
-                text = response.text.strip()
-                logger.info("Gemini: question generated in %.1fs (%d chars)", elapsed, len(text))
+                text = response.content[0].text.strip()
+                logger.info("Claude: question generated in %.1fs (%d chars)", elapsed, len(text))
                 return text
+            except ImportError:
+                logger.warning("Anthropic library not installed")
             except Exception as exc:
                 last_exc = exc
-                if attempt < 2:
-                    wait = 2 * (attempt + 1)
-                    logger.warning("Gemini attempt %d/3 failed (%s), retrying in %ds...", attempt + 1, exc, wait)
-                    time.sleep(wait)
-        logger.warning("Gemini failed after 3 attempts (%s), using fallback question", last_exc)
+                logger.warning("Claude failed (%s)", exc)
+
+        # 3. Try OpenAI (Codex / GPT-4o-mini)
+        if OPENAI_API_KEY:
+            try:
+                import openai
+                t0 = time.time()
+                openai_client = openai.OpenAI(api_key=OPENAI_API_KEY)
+                response = openai_client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=openai_messages,
+                    max_tokens=120
+                )
+                elapsed = time.time() - t0
+                text = response.choices[0].message.content.strip()
+                logger.info("OpenAI: question generated in %.1fs (%d chars)", elapsed, len(text))
+                return text
+            except ImportError:
+                logger.warning("OpenAI library not installed")
+            except Exception as exc:
+                last_exc = exc
+                logger.warning("OpenAI failed (%s)", exc)
+
+        logger.warning("All LLMs failed (%s), using fallback question", last_exc)
         return _FALLBACK_QUESTIONS[fallback_index % len(_FALLBACK_QUESTIONS)]

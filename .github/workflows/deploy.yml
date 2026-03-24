@@ -1,0 +1,67 @@
+name: Deploy AgentCast (Free Tier)
+
+on:
+  workflow_dispatch:  # Manually trigger from GitHub Actions tab
+
+jobs:
+  deploy-infra-and-app:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform Init & Apply
+        working-directory: ./infra/terraform
+        env:
+          TF_VAR_db_password: ${{ secrets.POSTGRES_PASSWORD }}
+        run: |
+          terraform init
+          terraform apply -auto-approve
+
+      - name: Get Infrastructure Outputs
+        working-directory: ./infra/terraform
+        id: get_outputs
+        run: |
+          echo "INSTANCE_ID=$(terraform output -raw ec2_instance_id)" >> $GITHUB_ENV
+          echo "RDS_ENDPOINT=$(terraform output -raw rds_endpoint)" >> $GITHUB_ENV
+
+      - name: Deploy App via AWS SSM
+        # Uses AWS Systems Manager to execute bash commands securely on the EC2 instance without SSH keys
+        run: |
+          # Wait a moment for SSM agent to be ready on new instances
+          sleep 30
+          
+          aws ssm send-command \
+            --instance-ids "${{ env.INSTANCE_ID }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "Deploy AgentCast" \
+            --parameters commands="[
+              \"sudo yum install -y jq\",
+              \"cd /home/ec2-user\",
+              \"if [ ! -d 'agent-postcast' ]; then git clone https://github.com/${{ github.repository }}.git agent-postcast; fi\",
+              \"cd agent-postcast\",
+              \"git fetch origin main\",
+              \"git reset --hard origin/main\",
+              \"echo 'POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}' > .env\",
+              \"echo 'DATABASE_URL=postgresql+asyncpg://agentcast:${{ secrets.POSTGRES_PASSWORD }}@${{ env.RDS_ENDPOINT }}/agentcast' >> .env\",
+              \"echo 'ADMIN_API_KEY=${{ secrets.ADMIN_API_KEY }}' >> .env\",
+              \"echo 'ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}' >> .env\",
+              \"echo 'GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}' >> .env\",
+              \"echo 'OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}' >> .env\",
+              \"echo 'DEEPGRAM_TTS_API_KEY=${{ secrets.DEEPGRAM_TTS_API_KEY }}' >> .env\",
+              \"echo 'CARTESIA_API_KEY=${{ secrets.CARTESIA_API_KEY }}' >> .env\",
+              \"/usr/local/bin/docker-compose -f infra/docker/docker-compose.yml down\",
+              \"# Skip the 'db' service since we use RDS\",
+              \"/usr/local/bin/docker-compose -f infra/docker/docker-compose.yml up --build -d redis nginx backend pipecat_host\"
+            ]" \
+            --timeout-seconds 600
