@@ -171,7 +171,7 @@ resource "aws_instance" "app_server" {
               
               # Install modern docker-buildx (required by compose v2)
               sudo mkdir -p /usr/local/lib/docker/cli-plugins ~/.docker/cli-plugins
-              sudo curl -L https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-buildx
+              sudo curl -L https://github.com/docker/buildx/releases/download/v0.17.1/buildx-v0.17.1.linux-amd64 -o /usr/local/lib/docker/cli-plugins/docker-buildx
               sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
               sudo ln -sf /usr/local/lib/docker/cli-plugins/docker-buildx ~/.docker/cli-plugins/docker-buildx
               EOF
