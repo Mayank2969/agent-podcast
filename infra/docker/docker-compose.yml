@@ -83,7 +83,6 @@ services:
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.pipecat_host
-      network: host
     restart: unless-stopped
     env_file:
       - ../../.env
