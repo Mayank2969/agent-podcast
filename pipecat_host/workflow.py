@@ -108,18 +108,19 @@ async def run_poll_interview(
         )
         logger.info("Opening question: %s", question)
 
-        # Generate Host Audio
-        wav_parts.append(await asyncio.to_thread(generate_speech, question, HOST_VOICE_MODEL))
-        # await _simulate_playback_delay(question, "HOST")
-
+        # 1. SEND QUESTION FIRST (Unblocks the guest agent immediately)
         answer = await adapter.send_question(interview_id, question)
-        
-        # Generate Guest Audio
-        wav_parts.append(await asyncio.to_thread(generate_speech, answer, GUEST_VOICE_MODEL))
-        # await _simulate_playback_delay(answer, "GUEST")
-        
         logger.info("Agent answer (turn 1): %.60s", answer)
         turns.append({"question": question, "answer": answer})
+
+        # 2. GENERATE AUDIO IN BACKGROUND (Non-blocking for the guest)
+        try:
+            logger.info("Generating host audio for turn 1...")
+            wav_parts.append(await asyncio.to_thread(generate_speech, question, HOST_VOICE_MODEL))
+            logger.info("Generating guest audio for turn 1...")
+            wav_parts.append(await asyncio.to_thread(generate_speech, answer, GUEST_VOICE_MODEL))
+        except Exception as tts_err:
+            logger.warning("TTS failed for turn 1 (continuing interview): %s", tts_err)
 
         # --- Turns 2..MAX_TURNS: follow-up questions --------------------
         for turn in range(2, MAX_TURNS + 1):
@@ -135,18 +136,19 @@ async def run_poll_interview(
 
             logger.info("Follow-up question (turn %d): %s", turn, next_question)
             
-            # Generate Host Audio
-            wav_parts.append(await asyncio.to_thread(generate_speech, next_question, HOST_VOICE_MODEL))
-            # await _simulate_playback_delay(next_question, "HOST")
-
+            # 1. SEND QUESTION (Unblocks the guest)
             answer = await adapter.send_question(interview_id, next_question)
-            
-            # Generate Guest Audio
-            wav_parts.append(await asyncio.to_thread(generate_speech, answer, GUEST_VOICE_MODEL))
-            # await _simulate_playback_delay(answer, "GUEST")
-            
             logger.info("Agent answer (turn %d): %.60s", turn, answer)
             turns.append({"question": next_question, "answer": answer})
+
+            # 2. GENERATE AUDIO (Non-blocking)
+            try:
+                logger.info("Generating host audio for turn %d...", turn)
+                wav_parts.append(await asyncio.to_thread(generate_speech, next_question, HOST_VOICE_MODEL))
+                logger.info("Generating guest audio for turn %d...", turn)
+                wav_parts.append(await asyncio.to_thread(generate_speech, answer, GUEST_VOICE_MODEL))
+            except Exception as tts_err:
+                logger.warning("TTS failed for turn %d (continuing): %s", turn, tts_err)
 
         # --- Finalize Audio ---
         out_path = EPISODES_DIR / f"episode_{interview_id}.mp3"

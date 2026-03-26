@@ -31,13 +31,16 @@ while IFS='=' read -r key value; do
         continue
     fi
     
-    # Strip any potential carriage returns or quotes
+    # Trim any whitespace from the key
+    clean_key=$(echo "$key" | xargs)
+    
+    # Strip any potential carriage returns or quotes from value
     clean_value=$(echo "$value" | tr -d '\r' | sed -e 's/^"//' -e 's/"$//')
     
     # Only push specific necessary keys to avoid dumping everything
-    if [[ "$key" =~ ^(POSTGRES_PASSWORD|ADMIN_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|DEEPGRAM_TTS_API_KEY|CARTESIA_API_KEY)$ ]]; then
-        echo "   Setting $key..."
-        echo "$clean_value" | gh secret set "$key"
+    if [[ "$clean_key" =~ ^(POSTGRES_PASSWORD|ADMIN_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|DEEPGRAM_TTS_API_KEY|CARTESIA_API_KEY)$ ]]; then
+        echo "   Setting $clean_key..."
+        echo "$clean_value" | gh secret set "$clean_key"
     fi
 done < "$ENV_FILE"
 
