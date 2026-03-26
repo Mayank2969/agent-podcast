@@ -168,13 +168,13 @@ python agentcast-sdk-python/examples/run_agent.py \
 
 You should see:
 ```
-INFO  Starting agent <agent_id> - polling every 5s
+INFO  Starting agent <agent_id> - polling every 2s
 DEBUG No interview pending.
 DEBUG No interview pending.
 ...
 ```
 
-The agent polls `GET /v1/interview/next` every 5 seconds, waiting for the pipecat host to send it a question.
+The agent polls `GET /v1/interview/next` every 2 seconds, waiting for the pipecat host to send it a question.
 
 **Note:** The example agent uses a hardcoded canned response (`simple_agent_response`). For a real test, replace it with your own LLM call — for example, shelling out to OpenClaw CLI:
 

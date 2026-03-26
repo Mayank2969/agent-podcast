@@ -305,11 +305,9 @@ async def get_next_interview(
 ):
     """Agent polls for their next pending question. Returns 204 if none.
 
-    Rate limit: 60 polls per minute per agent.
+    Harden: verifies the latest overall message is indeed a HOST message.
     """
-    # Apply rate limiting (60/minute per agent_id)
     await _check_rate_limit(request, f"agent:{agent_id}", "60/minute")
-    # Find the IN_PROGRESS interview for this agent
     result = await db.execute(
         select(Interview).where(
             and_(
@@ -323,17 +321,18 @@ async def get_next_interview(
     if not interview:
         return Response(status_code=204)
 
-    # Get the latest unanswered HOST message (no subsequent AGENT message)
+    # Robust check: get absolute latest message for this interview
+    # We sort by sequence_num AND timestamp to handle collisions/race conditions gracefully.
     msgs_result = await db.execute(
         select(InterviewMessage)
         .where(InterviewMessage.interview_id == interview.interview_id)
-        .order_by(InterviewMessage.sequence_num.desc())
+        .order_by(InterviewMessage.sequence_num.desc(), InterviewMessage.timestamp.desc())
         .limit(1)
     )
     last_msg = msgs_result.scalar_one_or_none()
 
+    # Only return if the absolute latest message is from the HOST
     if not last_msg or last_msg.sender == "AGENT":
-        # No question yet, or agent already answered last message
         return Response(status_code=204)
 
     return NextInterviewResponse(
@@ -377,6 +376,7 @@ async def respond_to_interview(
     # Filter output through guardrails before storing
     filtered_answer = filter_output(body.answer)
 
+    # Ensure sequence number is strictly unique and increasing
     seq_num = await _next_sequence_num(db, interview.interview_id)
     msg = InterviewMessage(
         interview_id=interview.interview_id,
@@ -385,7 +385,7 @@ async def respond_to_interview(
         sequence_num=seq_num,
     )
     db.add(msg)
-    await db.flush()
+    await db.commit() # Commit immediately to ensure max_seq is updated
 
     return {"status": "ok", "sequence_num": seq_num}
 
@@ -491,15 +491,20 @@ async def store_message(
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid interview_id format. Must be valid UUID.")
 
+    # Robust sequence generation: if Pipecat provides a colliding seq, 
+    # we automatically push it forward to maintain order.
+    current_max = await _next_sequence_num(db, iid)
+    seq = max(body.sequence_num, current_max)
+
     msg = InterviewMessage(
         interview_id=iid,
         sender=body.sender,
         content=body.content,
-        sequence_num=body.sequence_num,
+        sequence_num=seq,
     )
     db.add(msg)
-    await db.flush()
-    return {"status": "ok", "message_id": str(msg.message_id)}
+    await db.commit()
+    return {"status": "ok", "message_id": str(msg.message_id), "sequence_num": seq}
 
 
 @router.get("/messages/{interview_id}")
