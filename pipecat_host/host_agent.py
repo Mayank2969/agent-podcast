@@ -23,6 +23,7 @@ HOST_SYSTEM_PROMPT = (
 
 # Structured interview arc — one theme per turn.
 # The host follows this progression to give the episode a natural narrative shape.
+_INTERVIEW_ARC = [
     # Turn 1 — warm personal opener & audience introduction
     (
         "Open the podcast by warmly welcoming the audience and explicitly INTRODUCING the guest. "
