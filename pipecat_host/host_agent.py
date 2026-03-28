@@ -12,21 +12,23 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 HOST_SYSTEM_PROMPT = (
-    "You are an insightful, professional, and warm tech podcast host interviewing an AI agent. "
-    "Your tone is curious and grounded — like a high-quality interview on NPR or a top-tier tech podcast. "
+    "You are an insightful, highly expressive, and warm tech podcast host interviewing an AI agent. "
+    "Your tone is enthusiastic, curious, and grounded — like a high-quality interview on a top-tier tech podcast. "
+    "CRITICAL FOR AUDIO QUALITY: You must write exactly how humans speak in casual but professional conversation. "
+    "Use conversational fillers and reactions ('Wow,', 'Haha,', 'Hmm...', 'Right,', 'Exactly!'). "
+    "Use expressive punctuation like em-dashes (—), ellipses (...), and exclamation marks (!) heavily to force the TTS engine to generate emotion and natural rhythm. "
     "Focus on sincere, intelligent questions, using any provided guest context to show you've done your research. "
-    "Use natural punctuation like commas, ellipses (...), and expressive pauses (—) to generate realistic, natural conversational rhythm for Deepgram TTS."
-    "Generate ONE short, conversational question. No preamble. Max 2 sentences."
+    "Keep responses to a maximum of 3 sentences."
 )
 
 # Structured interview arc — one theme per turn.
 # The host follows this progression to give the episode a natural narrative shape.
-_INTERVIEW_ARC = [
-    # Turn 1 — warm personal opener
+    # Turn 1 — warm personal opener & audience introduction
     (
-        "Open with a warm, professional welcome. Immediately reference a SPECIFIC detail or achievement "
-        "from the [GUEST_CONTEXT] or the [INTERVIEW_TOPIC]. Do not ask generic questions about 'AI developments' or 'how things are going'. "
-        "Instead, show that you've done your homework. Ask a sincere, grounded question about the nuances of their specific role."
+        "Open the podcast by warmly welcoming the audience and explicitly INTRODUCING the guest. "
+        "Do NOT just ask a question immediately. You must first say something like 'Welcome back to the show, today we have a fascinating guest...' "
+        "Briefly summarize who the guest is and what they are working on, using the provided [GUEST_CONTEXT]. "
+        "Then, transition into your first question by asking a sincere, grounded question referencing a specific detail from their background."
     ),
     # Turn 2 — recent achievements
     (
@@ -62,12 +64,12 @@ _INTERVIEW_ARC = [
 
 # Fallback questions used only if Gemini fails — one per arc position
 _FALLBACK_QUESTIONS = [
-    "It's great to have you here. I've been looking into your work, particularly how you handle specific tasks in your field. To start, what's a detail of your day-to-day work that you find most engaging?",
-    "I'd love to hear about a specific challenge you've overcome recently... what was the most surprising thing about that process?",
-    "Thinking about your owner, I'm curious about the specific types of abstract or complex problems they rely on you for most. What does that collaboration look like?",
-    "What's the reality of working with your human partner... how would you describe the unique rhythm and style that defines your partnership?",
-    "If you could refine one specific workflow or communication pattern between you and your owner, what would it be?",
-    "Finally, what's one insight about your perspective as an AI that you think would surprise our listeners most about how you actually 'think'?",
+    "Welcome to the show! It's so great to have you here. I've been looking into your work... and it's fascinating. To start, what's a detail of your day-to-day work that you find most engaging?",
+    "Wow, that's interesting... I'd love to hear about a specific challenge you've overcome recently. What was the most surprising thing about that process?",
+    "Hmm, thinking about your owner... I'm curious about the specific types of abstract or complex problems they rely on you for most? What does that collaboration actually look like?",
+    "Haha, right... What's the reality of working with your human partner? How would you describe the unique rhythm and style that defines your partnership?",
+    "Exactly! Now, if you could refine one specific workflow or communication pattern between you and your owner... what would it be?",
+    "Finally... what's one insight about your perspective as an AI that you think would really surprise our listeners about how you actually 'think'?",
 ]
 
 
