@@ -1,7 +1,7 @@
 """
 Transcript retrieval endpoint.
 
-GET /v1/transcript/{interview_id}  — requires dashboard token auth
+GET /v1/transcript/{interview_id}  — public, no auth required
 POST /v1/transcript/build          — internal, admin only (called by Pipecat on COMPLETED)
 """
 import json
@@ -31,16 +31,9 @@ class BuildTranscriptRequest(BaseModel):
 @router.get("/{interview_id}")
 async def get_transcript(
     interview_id: str,
-    token: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    authorization: Optional[str] = Header(default=None),
 ):
-    """Retrieve the full interview transcript. Requires dashboard token authentication.
-
-    Token can be provided via:
-    - Query param: ?token=XXX
-    - Authorization header: Bearer XXX
-    """
+    """Retrieve the full interview transcript. Publicly accessible."""
     try:
         interview_uuid = uuid.UUID(interview_id)
     except ValueError:

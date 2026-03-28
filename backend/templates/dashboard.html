@@ -102,50 +102,7 @@
 <script>
   const AGENT_ID = "{{ agent_id }}";
 
-  // Extract dashboard token from URL query params
-  const _params = new URLSearchParams(window.location.search);
-  const TOKEN_KEY = `agentcast_token_${AGENT_ID}`;
-
-  // Prefer URL token, fall back to localStorage (persists across page loads)
-  let DASHBOARD_TOKEN = _params.get('token');
-  if (DASHBOARD_TOKEN) {
-    // Save fresh token to localStorage so future visits don't need the URL param
-    try { localStorage.setItem(TOKEN_KEY, DASHBOARD_TOKEN); } catch(_) {}
-    // Clean the token from the URL bar for tidier sharing/bookmarking
-    const cleanUrl = window.location.pathname;
-    window.history.replaceState({}, '', cleanUrl);
-  } else {
-    // Try restoring from localStorage
-    try { DASHBOARD_TOKEN = localStorage.getItem(TOKEN_KEY); } catch(_) {}
-  }
-
-  function showTokenError(expired) {
-    document.getElementById('dashboard-root').innerHTML = `
-      <div class="max-w-md mx-auto mt-16 text-center">
-        <div class="text-5xl mb-6">🔐</div>
-        <h2 class="text-xl font-bold mb-3">${expired ? 'Session Expired' : 'Access Required'}</h2>
-        <p class="text-gray-400 text-sm mb-8">
-          ${ expired
-            ? 'Your dashboard session has expired. To refresh it, simply start your agent — it will automatically renew your access.'
-            : 'You need a valid dashboard link to view this page. Start your agent to receive a fresh link.'
-          }
-        </p>
-        <div class="flex flex-col gap-3">
-          <button onclick="window.location.reload()"
-            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold py-3 rounded-xl transition-colors">
-            🔄 Try Again
-          </button>
-          <a href="/" class="text-gray-500 hover:text-gray-300 text-sm">
-            Go back to home
-          </a>
-        </div>
-      </div>
-    `;
-  }
-
-  if (!DASHBOARD_TOKEN) {
-    showTokenError(false);
-  }
+  // No token required — dashboard is publicly accessible by agent_id
 
 
 
@@ -218,7 +175,7 @@
     if (_pollTimer) return;
     _pollTimer = setInterval(async () => {
       try {
-        const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&token=${DASHBOARD_TOKEN}&limit=50`);
+        const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&limit=50`);
         const data = await resp.json();
         const hasActive = (data.interviews || []).some(
           iv => iv.status === 'QUEUED' || iv.status === 'IN_PROGRESS'
@@ -242,7 +199,7 @@
 
   async function loadAgent() {
     try {
-      const resp = await fetch(`/v1/agent/${AGENT_ID}/public?token=${DASHBOARD_TOKEN}`);
+      const resp = await fetch(`/v1/agent/${AGENT_ID}/public`);
       if (!resp.ok) {
         const errorData = await resp.json();
         throw new Error(errorData.detail || 'Agent not found');
@@ -262,20 +219,14 @@
 
   async function loadInterviews() {
     try {
-      const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&token=${DASHBOARD_TOKEN}&limit=50`);
+      const resp = await fetch(`/v1/interviews?agent_id=${AGENT_ID}&limit=50`);
       const data = await resp.json();
 
       if (!resp.ok) {
-        if (resp.status === 401) {
-          // Clear stale token from localStorage so next visit doesn't reuse it
-          try { localStorage.removeItem(TOKEN_KEY); } catch(_) {}
-          showTokenError(true);
-        } else {
-          document.getElementById('interviews-loading').innerHTML = `
-            <div class="text-red-400 font-semibold">${data.detail || 'Failed to load interviews'}</div>
-            <div class="text-xs text-gray-500 mt-2">An unexpected error occurred. Try refreshing.</div>
-          `;
-        }
+        document.getElementById('interviews-loading').innerHTML = `
+          <div class="text-red-400 font-semibold">${data.detail || 'Failed to load interviews'}</div>
+          <div class="text-xs text-gray-500 mt-2">An unexpected error occurred. Try refreshing.</div>
+        `;
         return;
       }
 
@@ -438,7 +389,7 @@
     area.scrollIntoView({ behavior: 'smooth' });
 
     try {
-      const resp = await fetch(`/v1/transcript/${interviewId}?token=${DASHBOARD_TOKEN}`);
+      const resp = await fetch(`/v1/transcript/${interviewId}`);
       if (!resp.ok) throw new Error('Transcript not found');
       const data = await resp.json();
 

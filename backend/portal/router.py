@@ -48,30 +48,11 @@ class RequestInterviewDashboard(BaseModel):
 @router.get("/v1/interviews")
 async def list_interviews(
     agent_id: str,
-    token: Optional[str] = Query(default=None),
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-    authorization: Optional[str] = Header(default=None),
 ):
-    """List interviews for a given agent. Requires dashboard token authentication.
-
-    Token can be provided via:
-    - Query param: ?token=XXX
-    - Authorization header: Bearer XXX
-    """
-    # Extract token from Authorization header or query param
-    token_to_check = token
-    if not token_to_check and authorization:
-        # Extract from "Bearer XXX" format
-        if authorization.startswith("Bearer "):
-            token_to_check = authorization[7:]
-
-    if not token_to_check:
-        raise HTTPException(status_code=401, detail="Dashboard token required (use ?token=XXX or Authorization: Bearer XXX)")
-
-    # Validate token
-    await validate_dashboard_token(agent_id, token_to_check, db)
+    """List interviews for a given agent. Publicly accessible by agent_id."""
     # Total count
     count_result = await db.execute(
         select(func.count(Interview.interview_id)).where(Interview.agent_id == agent_id)
@@ -291,21 +272,9 @@ async def list_agents(
 @router.get("/v1/agent/{agent_id}/public")
 async def get_agent_public(
     agent_id: str,
-    token: Optional[str] = Query(default=None),
     db: AsyncSession = Depends(get_db),
-    authorization: Optional[str] = Header(default=None),
 ):
-    """Public agent info — no callback_url exposed. Requires dashboard token."""
-    # Extract token from Authorization header or query param
-    token_to_check = token
-    if not token_to_check and authorization:
-        # Extract from "Bearer XXX" format
-        if authorization.startswith("Bearer "):
-            token_to_check = authorization[7:]
-
-    if not token_to_check:
-        raise HTTPException(status_code=401, detail="Dashboard token required (use ?token=XXX or Authorization: Bearer XXX)")
-
+    """Public agent info — no auth required."""
     result = await db.execute(select(Agent).where(Agent.agent_id == agent_id))
     agent = result.scalar_one_or_none()
     if not agent:
