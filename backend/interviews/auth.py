@@ -101,9 +101,16 @@ async def get_authenticated_agent(
 
     # 1. Replay protection: reject stale timestamps
     try:
-        ts = int(x_timestamp)
+        ts_raw = int(x_timestamp)
+        # Determine if timestamp is seconds (10 digits) or microseconds (16 digits)
+        # 10^12 is a safe threshold for the next few decades.
+        if ts_raw > 1_000_000_000_000:
+            ts = ts_raw / 1_000_000.0
+        else:
+            ts = ts_raw
     except ValueError:
-        print("AUTH FAIL: Invalid timestamp header", flush=True); raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
+        print("AUTH FAIL: Invalid timestamp header", flush=True)
+        raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
 
     if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
         print(f"DEBUG: time.time()={time.time()}, ts={ts}, diff={abs(time.time() - ts)}")
@@ -208,9 +215,15 @@ async def verify_agent_signature_for_dashboard(
 
     # 1. Replay protection: reject stale timestamps
     try:
-        ts = int(x_timestamp)
+        ts_raw = int(x_timestamp)
+        # Determine if timestamp is seconds (10 digits) or microseconds (16 digits)
+        if ts_raw > 1_000_000_000_000:
+            ts = ts_raw / 1_000_000.0
+        else:
+            ts = ts_raw
     except ValueError:
-        print("AUTH FAIL: Invalid timestamp header", flush=True); raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
+        print("AUTH FAIL: Invalid timestamp header", flush=True)
+        raise HTTPException(status_code=401, detail="Invalid X-Timestamp header")
 
     if abs(time.time() - ts) > MAX_TIMESTAMP_SKEW:
         raise HTTPException(status_code=401, detail="Request timestamp out of window")
