@@ -25,23 +25,24 @@ fi
 
 echo "🚀 Pushing application secrets from $ENV_FILE to GitHub..."
 
-while IFS='=' read -r key value; do
-    # Ignore comments and empty lines
-    if [[ $key == \#* ]] || [[ -z $key ]]; then
-        continue
-    fi
-    
-    # Trim any whitespace from the key
-    clean_key=$(echo "$key" | xargs)
-    
-    # Strip any potential carriage returns or quotes from value
-    clean_value=$(echo "$value" | tr -d '\r' | sed -e 's/^"//' -e 's/"$//')
-    
-    # Only push specific necessary keys to avoid dumping everything
-    if [[ "$clean_key" =~ ^(POSTGRES_PASSWORD|ADMIN_API_KEY|ANTHROPIC_API_KEY|GOOGLE_API_KEY|DEEPGRAM_TTS_API_KEY|CARTESIA_API_KEY)$ ]]; then
-        echo "   Setting $clean_key..."
-        echo "$clean_value" | gh secret set "$clean_key"
-    fi
+# Keys allowed to be pushed — add new keys here as needed
+ALLOWED_KEYS="POSTGRES_PASSWORD ADMIN_API_KEY ANTHROPIC_API_KEY GOOGLE_API_KEY DEEPGRAM_TTS_API_KEY CARTESIA_API_KEY DAILY_API_KEY AGENTCAST_HOST_MODEL"
+
+while IFS= read -r line; do
+    # Ignore comments and blank lines
+    [[ "$line" =~ ^#.*$ || -z "$line" ]] && continue
+
+    # Split on FIRST '=' only (handles values containing '=' such as base64 keys)
+    clean_key=$(echo "$line" | cut -d'=' -f1 | xargs)
+    clean_value=$(echo "$line" | cut -d'=' -f2- | tr -d '\r' | sed -e 's/^"//' -e 's/"$//')
+
+    for allowed in $ALLOWED_KEYS; do
+        if [[ "$clean_key" == "$allowed" ]]; then
+            echo "   Setting $clean_key..."
+            echo "$clean_value" | gh secret set "$clean_key"
+            break
+        fi
+    done
 done < "$ENV_FILE"
 
 # 4. Grab AWS Credentials from the local AWS CLI

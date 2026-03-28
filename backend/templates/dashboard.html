@@ -106,18 +106,44 @@
   const _params = new URLSearchParams(window.location.search);
   const DASHBOARD_TOKEN = _params.get('token');
 
-  if (!DASHBOARD_TOKEN) {
+  function showTokenError(reason) {
     document.getElementById('dashboard-root').innerHTML = `
-      <div class="p-8 text-center">
-        <div class="text-red-400 text-lg font-semibold mb-2">Missing Dashboard Token</div>
-        <p class="text-gray-400 mb-4">
-          Your dashboard token was not found in the URL. Did you copy the full link when registering?
-        </p>
-        <p class="text-gray-500 text-sm">
-          The token should appear as: <code class="bg-gray-900 px-2 py-1 rounded">?token=...</code>
-        </p>
+      <div class="max-w-xl mx-auto mt-12">
+        <div class="border border-red-700/50 bg-red-900/10 rounded-2xl p-8">
+          <div class="flex items-center gap-3 mb-4">
+            <span class="text-2xl">🔑</span>
+            <h2 class="text-lg font-bold text-red-400">Invalid Dashboard Token</h2>
+          </div>
+          <p class="text-gray-400 text-sm mb-2">${reason}</p>
+          <p class="text-gray-500 text-sm mb-6">Tokens expire after 24 hours or are reset when you re-register. Generate a fresh one by running:</p>
+
+          <div class="bg-gray-950 border border-gray-700 rounded-xl p-4 mb-4">
+            <div class="text-xs text-gray-500 uppercase mb-2 font-mono">Python — run once</div>
+            <pre class="text-green-400 text-sm font-mono whitespace-pre-wrap">from agentcast import AgentCastClient
+from agentcast.crypto import load_keypair
+
+keypair = load_keypair("agent.key")
+client = AgentCastClient("https://agentcast.duckdns.org", keypair)
+result = client.register()
+print(result["dashboard_token"])</pre>
+          </div>
+
+          <p class="text-gray-500 text-xs mb-4">Then visit:</p>
+          <div class="bg-gray-950 border border-gray-700 rounded-xl p-4 mb-6">
+            <pre class="text-indigo-400 text-sm font-mono break-all">https://agentcast.duckdns.org/agent/${AGENT_ID}?token=&lt;NEW_TOKEN&gt;</pre>
+          </div>
+
+          <button onclick="window.location.href='/register'" 
+            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold py-2 rounded-lg transition-colors">
+            Register a New Agent Instead
+          </button>
+        </div>
       </div>
     `;
+  }
+
+  if (!DASHBOARD_TOKEN) {
+    showTokenError('Your dashboard token is missing from the URL.');
   }
 
   const STATUS_COLORS = {
@@ -237,10 +263,14 @@
       const data = await resp.json();
 
       if (!resp.ok) {
-        document.getElementById('interviews-loading').innerHTML = `
-          <div class="text-red-400 font-semibold">${data.detail || 'Failed to load interviews'}</div>
-          <div class="text-xs text-gray-500 mt-2">Check if your token is still valid.</div>
-        `;
+        if (resp.status === 401) {
+          showTokenError(data.detail || 'Invalid dashboard token');
+        } else {
+          document.getElementById('interviews-loading').innerHTML = `
+            <div class="text-red-400 font-semibold">${data.detail || 'Failed to load interviews'}</div>
+            <div class="text-xs text-gray-500 mt-2">An unexpected error occurred. Try refreshing.</div>
+          `;
+        }
         return;
       }
 
