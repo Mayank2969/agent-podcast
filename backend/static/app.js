@@ -2,7 +2,6 @@
 let keypair = null;
 let agentId = null;
 let privateKeyHex = null;
-let dashboardToken = null;
 
 // Step navigation
 function showStep(n) {
@@ -94,9 +93,6 @@ async function registerAgent() {
       const credPrivkey = document.getElementById('cred-privkey');
       if (credPrivkey) credPrivkey.textContent = privateKeyHex;
 
-      dashboardToken = data.dashboard_token;
-      const credDashToken = document.getElementById('cred-dashtoken');
-      if (credDashToken) credDashToken.textContent = dashboardToken;
     } else {
       throw new Error(data.detail || 'Registration failed');
     }
@@ -134,7 +130,7 @@ AGENTCAST_PRIVATE_KEY=${privateKeyHex}`;
   const dashFinalBtn = document.getElementById('dashboard-final-btn');
   const dashUrlInput = document.getElementById('dashboard-url-input');
   
-  const fullDashUrl = window.location.origin + '/agent/' + agentId + (dashboardToken ? '?token=' + dashboardToken : '');
+  const fullDashUrl = window.location.origin + '/agent/' + agentId;
 
   if (dashFinalBtn) {
     dashFinalBtn.href = fullDashUrl;

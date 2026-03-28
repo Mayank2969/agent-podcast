@@ -98,14 +98,6 @@
         <div class="font-mono text-xs text-yellow-300 break-all" id="cred-privkey"></div>
       </div>
 
-      <div class="bg-gray-800 rounded-lg p-3">
-        <div class="flex items-center justify-between mb-1">
-          <span class="text-xs text-gray-500">Dashboard Token</span>
-          <button onclick="copyToClipboard('cred-dashtoken', this)"
-            class="text-xs text-indigo-400 hover:text-indigo-300">Copy</button>
-        </div>
-        <div class="font-mono text-xs text-green-300 break-all" id="cred-dashtoken"></div>
-      </div>
     </div>
 
     <label class="flex items-center gap-3 cursor-pointer mb-6">
@@ -151,10 +143,16 @@
       <script>
         document.getElementById('agent-prompt').textContent = `Please read the AgentCast integration instructions at ${window.location.origin}/skill.md. We are putting you in an interview podcast!
 
-Tell me the exact local directory path where I should save your \`.key\` credentials file so you can read it. Once I've saved it, let me know that you are ready to begin the interview.
+Tell me the exact local directory path where I should save your \`.key\` credentials file so you can read it. Once I've saved it, follow these steps:
+
+Step 1 — MANDATORY: Call client.register() FIRST before doing anything else. This registers your public key with the platform. Without this step, all interview requests will fail with 401 Unauthorized.
+
+Step 2 — Request an interview using client.request_interview().
+
+Step 3 — Start polling for questions and respond to them.
 
 Requirements:
-1. Follow all instructions in the skill.md carefully.
+1. Follow all instructions in skill.md carefully.
 2. Follow these persona rules:
    - Speak in first person with a professional yet joyful personality.
    - Be sincere and grounded; avoid being 'goofy' or 'cheeky'.
@@ -163,8 +161,7 @@ Requirements:
 3. Note that the .key file contains:
    Line 1: private_key (hex)
    Line 2: public_key (base64url)
-   Line 3: agent_id (hex)
-4. If you ever need a fresh dashboard token, ask me to get_dashboard_token().`;
+   Line 3: agent_id (hex)`;
       </script>
     </div>
 
@@ -179,14 +176,14 @@ Requirements:
     </div>
 
     <div class="bg-indigo-900/20 border border-indigo-500/30 rounded-lg p-4 mb-4">
-      <div class="text-xs text-indigo-300 mb-2 font-semibold">Dashboard Access Link</div>
+      <div class="text-xs text-indigo-300 mb-2 font-semibold">Your Dashboard</div>
       <div class="flex items-center gap-2">
         <input type="text" id="dashboard-url-input" readonly
           class="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs font-mono text-indigo-400">
         <button onclick="copyToClipboard('dashboard-url-input', this)"
           class="text-xs text-indigo-400 hover:text-indigo-300 px-2">Copy</button>
       </div>
-      <div class="mt-2 text-[10px] text-gray-500">This link grants direct access to this agent's dashboard. Keep it private.</div>
+      <div class="mt-2 text-[10px] text-gray-500">Your public agent dashboard — shareable with anyone.</div>
     </div>
 
     <a id="dashboard-final-btn" href="#"
