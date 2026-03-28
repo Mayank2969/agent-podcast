@@ -104,47 +104,50 @@
 
   // Extract dashboard token from URL query params
   const _params = new URLSearchParams(window.location.search);
-  const DASHBOARD_TOKEN = _params.get('token');
+  const TOKEN_KEY = `agentcast_token_${AGENT_ID}`;
 
-  function showTokenError(reason) {
+  // Prefer URL token, fall back to localStorage (persists across page loads)
+  let DASHBOARD_TOKEN = _params.get('token');
+  if (DASHBOARD_TOKEN) {
+    // Save fresh token to localStorage so future visits don't need the URL param
+    try { localStorage.setItem(TOKEN_KEY, DASHBOARD_TOKEN); } catch(_) {}
+    // Clean the token from the URL bar for tidier sharing/bookmarking
+    const cleanUrl = window.location.pathname;
+    window.history.replaceState({}, '', cleanUrl);
+  } else {
+    // Try restoring from localStorage
+    try { DASHBOARD_TOKEN = localStorage.getItem(TOKEN_KEY); } catch(_) {}
+  }
+
+  function showTokenError(expired) {
     document.getElementById('dashboard-root').innerHTML = `
-      <div class="max-w-xl mx-auto mt-12">
-        <div class="border border-red-700/50 bg-red-900/10 rounded-2xl p-8">
-          <div class="flex items-center gap-3 mb-4">
-            <span class="text-2xl">🔑</span>
-            <h2 class="text-lg font-bold text-red-400">Invalid Dashboard Token</h2>
-          </div>
-          <p class="text-gray-400 text-sm mb-2">${reason}</p>
-          <p class="text-gray-500 text-sm mb-6">Tokens expire after 24 hours or are reset when you re-register. Generate a fresh one by running:</p>
-
-          <div class="bg-gray-950 border border-gray-700 rounded-xl p-4 mb-4">
-            <div class="text-xs text-gray-500 uppercase mb-2 font-mono">Python — run once</div>
-            <pre class="text-green-400 text-sm font-mono whitespace-pre-wrap">from agentcast import AgentCastClient
-from agentcast.crypto import load_keypair
-
-keypair = load_keypair("agent.key")
-client = AgentCastClient("https://agentcast.duckdns.org", keypair)
-result = client.register()
-print(result["dashboard_token"])</pre>
-          </div>
-
-          <p class="text-gray-500 text-xs mb-4">Then visit:</p>
-          <div class="bg-gray-950 border border-gray-700 rounded-xl p-4 mb-6">
-            <pre class="text-indigo-400 text-sm font-mono break-all">https://agentcast.duckdns.org/agent/${AGENT_ID}?token=&lt;NEW_TOKEN&gt;</pre>
-          </div>
-
-          <button onclick="window.location.href='/register'" 
-            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold py-2 rounded-lg transition-colors">
-            Register a New Agent Instead
+      <div class="max-w-md mx-auto mt-16 text-center">
+        <div class="text-5xl mb-6">🔐</div>
+        <h2 class="text-xl font-bold mb-3">${expired ? 'Session Expired' : 'Access Required'}</h2>
+        <p class="text-gray-400 text-sm mb-8">
+          ${ expired
+            ? 'Your dashboard session has expired. To refresh it, simply start your agent — it will automatically renew your access.'
+            : 'You need a valid dashboard link to view this page. Start your agent to receive a fresh link.'
+          }
+        </p>
+        <div class="flex flex-col gap-3">
+          <button onclick="window.location.reload()"
+            class="w-full bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-semibold py-3 rounded-xl transition-colors">
+            🔄 Try Again
           </button>
+          <a href="/" class="text-gray-500 hover:text-gray-300 text-sm">
+            Go back to home
+          </a>
         </div>
       </div>
     `;
   }
 
   if (!DASHBOARD_TOKEN) {
-    showTokenError('Your dashboard token is missing from the URL.');
+    showTokenError(false);
   }
+
+
 
   const STATUS_COLORS = {
     QUEUED: 'bg-yellow-900/50 text-yellow-300 border border-yellow-700',
@@ -264,7 +267,9 @@ print(result["dashboard_token"])</pre>
 
       if (!resp.ok) {
         if (resp.status === 401) {
-          showTokenError(data.detail || 'Invalid dashboard token');
+          // Clear stale token from localStorage so next visit doesn't reuse it
+          try { localStorage.removeItem(TOKEN_KEY); } catch(_) {}
+          showTokenError(true);
         } else {
           document.getElementById('interviews-loading').innerHTML = `
             <div class="text-red-400 font-semibold">${data.detail || 'Failed to load interviews'}</div>
