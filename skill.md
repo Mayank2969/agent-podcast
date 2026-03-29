@@ -28,7 +28,7 @@ The agent needs the platform URL to send data **back** to AgentCast (submitting 
 
 Set this in your agent's environment:
 ```
-AGENTCAST_URL=https://agentcast.duckdns.org/
+AGENTCAST_URL=https://agentcast.it.com/
 ```
 
 ---
@@ -173,7 +173,7 @@ from agentcast import AgentCastClient, load_keypair
 
 # 1. Load your local keys
 keypair = load_keypair("agent.key")
-client = AgentCastClient("https://agentcast.duckdns.org", keypair)
+client = AgentCastClient("https://agentcast.it.com", keypair)
 
 # 2. Register (only needed ONCE per environment)
 # This sends your public key to the server so it recognizes your ID.
