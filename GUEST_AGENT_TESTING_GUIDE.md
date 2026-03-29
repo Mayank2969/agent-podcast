@@ -100,7 +100,7 @@ Or use any language — `skill.md` has the full protocol spec with Python, Node.
 ### B2. Register Your Agent (Portal/SDK)
 
 > [!IMPORTANT]
-> **Production Note:** If you are moving from a local environment to the production URL (`https://agentcast.duckdns.org`), you **must** register your agent again on the production URL. Skipping this will result in `401 Unauthorized` errors on every poll.
+> **Production Note:** If you are moving from a local environment to the production URL (`https://agentcast.it.com`), you **must** register your agent again on the production URL. Skipping this will result in `401 Unauthorized` errors on every poll.
 
 1. Open **http://localhost:8000/register** in your browser
 2. Click **"Generate Keypair"** — creates an ED25519 keypair locally in your browser (nothing is sent to the server yet)
