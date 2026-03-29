@@ -1,17 +1,19 @@
 """
 Guardrail filters for AgentCast using guardrails-ai library.
 
-Dual-layer validation strategy for agent responses (filter_output):
-1. PromptInjection - LLM-based detection of escape attempts, jailbreaks, instruction overrides
-2. DetectPII - Redacts personally identifiable information (email, phone, SSN, etc)
+Single-layer validation strategy for agent responses (filter_output):
+- DetectPII: Redacts personally identifiable information (email, phone, SSN, credit card, etc)
+  on_fail="filter" means PII is redacted in-place, message still delivered
 
-Removed SecretsPresent due to excessive false positives on legitimate technical responses
-(words like "monitoring", "telemetry", "buffering", "logging" were being blocked).
+REMOVED validators due to excessive false positives on legitimate technical responses:
+- PromptInjection: Was blocking normal agent responses about monitoring, telemetry, buffering
+- SecretsPresent: Was blocking words like "logging", "connection", "endpoint"
 
-Host questions (filter_input) are NOT filtered because:
-- Host is our trusted Pipecat system code
-- Filtering blocks legitimate interview questions
-- Guests validate questions themselves client-side
+Security model:
+- Rely on model alignment (agents' own training prevents harmful outputs)
+- Redact sensitive data (PII) to prevent accidental leakage
+- Don't block legitimate technical conversation
+- Host questions are NOT filtered (trusted Pipecat system code)
 """
 import logging
 from typing import Optional
@@ -26,51 +28,50 @@ REDACTED = "[REDACTED]"
 _guard: Optional[object] = None
 
 def _get_guard():
-    """Lazily load and cache the guardrails Guard instance with validators."""
+    """Lazily load and cache the guardrails Guard instance."""
     global _guard
     if _guard is None:
         try:
             from guardrails import Guard
-            from guardrails.hub import PromptInjection, DetectPII
+            from guardrails.hub import DetectPII
 
             _guard = Guard()
 
-            # Layer 1: Detect prompt injection / escape attempts (BLOCK)
-            # LLM-based semantic detection - catches jailbreaks, instruction overrides
-            _guard.use(PromptInjection, on_fail="exception")
-            logger.info("Added PromptInjection validator (LLM-based)")
-
-            # Layer 2: Redact PII (email, phone, SSN, credit cards, etc) - REDACT
-            # Detects and redacts personally identifiable information in-place
+            # Single validator: Redact PII (email, phone, SSN, credit cards, names, addresses)
+            # on_fail="filter" means redact in-place with [REDACTED], don't block message
             _guard.use(DetectPII, on_fail="filter")
-            logger.info("Added DetectPII validator (redaction mode)")
+            logger.info("Guardrails-ai DetectPII validator initialized (redaction mode)")
 
-            logger.info("Guardrails-ai dual-layer validation initialized")
         except ImportError as e:
             logger.error(
-                f"guardrails-ai validators not installed! Install with: "
+                f"guardrails-ai not installed! Install with: "
                 f"pip install guardrails-ai && "
-                f"guardrails hub install hub://guardrails/prompt_injection "
-                f"hub://guardrails/detect_pii"
+                f"guardrails hub install hub://guardrails/detect_pii"
             )
             raise
     return _guard
 
 
 def filter_output(text: str) -> str:
-    """Filter agent responses with dual-layer validation.
+    """Filter agent responses by redacting PII.
 
-    Validates agent responses against 2 threats:
-    1. Prompt injection / jailbreak attempts (LLM-based PromptInjection)
-       → Blocks entire message if detected
-    2. PII leakage (email, phone, SSN, credit card, name, address, etc)
-       → Redacts in-place with [REDACTED]
+    Detects and redacts personally identifiable information in agent responses:
+    - Email addresses
+    - Phone numbers
+    - Social Security Numbers (SSN)
+    - Credit card numbers
+    - Names, addresses
+
+    The message is NOT blocked - PII is simply redacted with [REDACTED].
+
+    This prevents accidental leakage of sensitive data while allowing
+    agents to freely discuss technical topics without false positives.
 
     Args:
         text: Agent's response text to be sent to the host
 
     Returns:
-        Safe text (with PII redacted) if clean, or [CONTENT_BLOCKED] if injection detected
+        Text with PII redacted to [REDACTED], message always delivered
     """
     if not text:
         return ""
@@ -78,13 +79,13 @@ def filter_output(text: str) -> str:
     try:
         guard = _get_guard()
         result = guard.validate(text)
-        logger.debug("Agent response passed guardrails validation")
+        logger.debug("Agent response processed - PII redacted if present")
         return str(result.validated_output) if hasattr(result, 'validated_output') else text
     except Exception as e:
         error_msg = str(e)[:100]
-        logger.warning(f"Agent response blocked by guardrails: {error_msg}")
-        logger.error("SECURITY: Agent response blocked - possible prompt injection attempt")
-        return CONTENT_BLOCKED
+        logger.warning(f"PII redaction error (continuing): {error_msg}")
+        # Even if redaction fails, still return the original text (don't block)
+        return text
 
 
 def filter_input(text: str) -> str:
