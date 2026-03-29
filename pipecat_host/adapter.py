@@ -12,7 +12,7 @@ from typing import Optional
 
 from pipecat_host.backend_client import BackendClient
 from pipecat_host.exceptions import InterviewTimeoutError
-from backend.guardrails import filter_input, filter_output
+from backend.guardrails import filter_output
 
 logger = logging.getLogger(__name__)
 
@@ -40,19 +40,14 @@ class RemoteAgentAdapter:
     async def send_question(self, interview_id: str, question: str) -> str:
         """Send a HOST question, wait for AGENT response. Returns answer text.
 
-        Applies filter_input guardrail to the question before storing it.
-        If blocked, returns a sentinel string without waiting for a response.
+        Note: HOST questions are not filtered through guardrails because
+        the host is our own trusted code. Guardrails are applied to AGENT
+        responses (filter_output) to protect against malicious agents.
         """
-        filtered_question = filter_input(question)
-        if filtered_question == "[CONTENT_BLOCKED]":
-            logger.warning(
-                "Host question blocked by guardrails: %.50s", question
-            )
-            return "[HOST_QUESTION_BLOCKED]"
-
+        # Host is trusted - no input validation needed
         seq = self._next_seq(interview_id)
         await self.client.store_message(
-            interview_id, "HOST", filtered_question, seq
+            interview_id, "HOST", question, seq
         )
         logger.info(
             "Stored HOST message seq=%d for interview %s", seq, interview_id
