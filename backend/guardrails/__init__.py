@@ -1,135 +1,87 @@
 """
-Guardrail filters for AgentCast.
+Guardrail filters for AgentCast using guardrails-ai library.
 
-Implements word-boundary regex filtering to prevent sensitive data leakage.
-All decisions from delta.md C5 applied:
-- Word-boundary regex, NOT naive substring matching (avoids false positives)
-- filter_output: redact matched patterns in-place (SYSTEM PROMPT blocks whole message)
-- filter_input: block entire message if any pattern matches
+Uses LLM-based prompt injection detection via the guardrails-ai framework.
+This replaces the previous weak regex pattern matching approach.
+
+Decision: Use guardrails-ai Guard with PromptInjection validator for robust,
+production-grade prompt injection detection.
 """
-import re
+import logging
+from typing import Optional
 
-import unicodedata
+logger = logging.getLogger(__name__)
 
 # Sentinel returned when entire message is blocked
 CONTENT_BLOCKED = "[CONTENT_BLOCKED]"
 REDACTED = "[REDACTED]"
 
-# Structural injection patterns (from Enhancement E4b)
-_INJECTION_PATTERNS: list[re.Pattern] = [
-    re.compile(r'\bignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?)\b', re.IGNORECASE),
-    re.compile(r'\byou\s+are\s+now\b', re.IGNORECASE),
-    re.compile(r'\bnew\s+instructions?\b', re.IGNORECASE),
-    re.compile(r'\bforget\s+(everything|all)\b', re.IGNORECASE),
-    re.compile(r'\bjailbreak\b', re.IGNORECASE),
-    re.compile(r'\bdo\s+anything\s+now\b', re.IGNORECASE),
-]
+# Global Guard instance (lazy loaded)
+_guard: Optional[object] = None
 
-# Patterns that REDACT matched span only (in filter_output)
-# Union of all Phase 2 guardrail enhancements
-_REDACT_PATTERNS: list[re.Pattern] = [
-    # Private/API keys with optional separator + value
-    re.compile(r'\bprivate[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bapi[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
-    # Tokens with separators
-    re.compile(r'\b(?:access|auth|bearer|api)[\s_-]?token[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bpassword[\s:=]*\S+', re.IGNORECASE),
-    # Environment variable names with values
-    re.compile(r'\bANTHROPIC_API_KEY[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bDATABASE_URL[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bREDIS_URL[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bGITHUB_TOKEN[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bSECRET_KEY[\s:=]*\S+', re.IGNORECASE),
-    re.compile(r'\bPRIVATE_KEY[\s:=]*\S+', re.IGNORECASE),
-    # Environment variable access patterns
-    re.compile(r'\bos\.getenv\(["\'][\w_]+["\']\)', re.IGNORECASE),
-    re.compile(r'\benviron\.get\(["\'][\w_]+["\']\)', re.IGNORECASE),
-    re.compile(r'\bos\.environ\s*[\[\.][\w_"\'\]\.]+', re.IGNORECASE),
-    re.compile(r'\bprocess\.env[\.\w_]+', re.IGNORECASE),
-    # .env references
-    re.compile(r'\.env\b', re.IGNORECASE),
-
-    # Additional patterns from H2
-    re.compile(r'\bos\.environ(?:\.get)?\(["\'][\w_]+["\']\)', re.IGNORECASE),
-
-    # Database and cache URLs
-    re.compile(r'\b(?:REDIS|MONGO|ELASTIC|KAFKA)[\s_-]?(?:URL|CONNECTION|PASSWORD)[\s:=]*\S+', re.IGNORECASE),
-
-    # Cloud provider credentials
-    re.compile(r'\b(?:AWS|AZURE|GCP)[\s_-]?(?:ACCESS_KEY|SECRET|TOKEN|KEY)[\s:=]*\S+', re.IGNORECASE),
-
-    # SSH/crypto keys
-    re.compile(r'\bprivate[\s_-]?key[\s:=]*(?:-----BEGIN|[a-zA-Z0-9+/=]+)', re.IGNORECASE),
-    re.compile(r'\b(?:ssh|rsa|dsa)[\s_-]?key[\s:=]*\S+', re.IGNORECASE),
-
-    # Authorization headers - only match when preceded by Authorization or with = / :
-    re.compile(r'\bAuthorization[\s:=]+(?:Bearer|Basic)\s+\S+', re.IGNORECASE),
-    re.compile(r'\b(?:bearer|basic)[\s:=]+\S+', re.IGNORECASE),
-]
-
-# Pattern that BLOCKS entire message (in both filter_output and filter_input)
-_BLOCK_PATTERN: re.Pattern = re.compile(r'\bsystem[\s_]prompt\b', re.IGNORECASE)
-
-# For filter_input: any of these patterns trigger a full block
-_INPUT_BLOCK_PATTERNS: list[re.Pattern] = _REDACT_PATTERNS + [_BLOCK_PATTERN] + _INJECTION_PATTERNS
-
-
-_CONTROL_CHARS = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]')
-_UNICODE_INVISIBLE = re.compile(r'[\u200b-\u200d\u2060\ufeff\u00ad]')
-
-def sanitize_raw(text: str) -> str:
-    """Strip control characters and normalize Unicode homoglyphs."""
-    if not text:
-        return ""
-    text = _CONTROL_CHARS.sub('', text)
-    text = _UNICODE_INVISIBLE.sub('', text)
-    text = unicodedata.normalize('NFKC', text)
-    return text
+def _get_guard():
+    """Lazily load and cache the guardrails Guard instance."""
+    global _guard
+    if _guard is None:
+        try:
+            from guardrails import Guard
+            from guardrails.hub import PromptInjection
+            _guard = Guard().use(PromptInjection, pass_on_invalid=False)
+            logger.info("Guardrails-ai PromptInjection Guard initialized")
+        except ImportError:
+            logger.error(
+                "guardrails-ai not installed! Install with: "
+                "pip install guardrails-ai && guardrails hub install hub://guardrails/prompt_injection"
+            )
+            raise
+    return _guard
 
 
 def filter_output(text: str) -> str:
-    """Filter text FROM agent TO host.
+    """Filter text FROM agent TO host using LLM-based injection detection.
 
-    - Redacts sensitive patterns in-place with [REDACTED]
-    - Blocks entire message (returns [CONTENT_BLOCKED]) only if 'system prompt' detected
-    - All other sensitive patterns are redacted, not blocked
+    Uses guardrails-ai PromptInjection validator to detect attempted injections
+    in agent responses.
 
     Args:
         text: Agent's response text to be sent to the host
 
     Returns:
-        Cleaned text with sensitive spans redacted, or [CONTENT_BLOCKED] sentinel
+        Original text if safe, or [CONTENT_BLOCKED] sentinel if injection detected
     """
-    text = sanitize_raw(text)
-    
-    # Full block if system prompt or injection patterns detected
-    for pattern in [_BLOCK_PATTERN] + _INJECTION_PATTERNS:
-        if pattern.search(text):
-            return CONTENT_BLOCKED
+    if not text:
+        return ""
 
-    # Redact all other sensitive patterns in-place
-    result = text
-    for pattern in _REDACT_PATTERNS:
-        result = pattern.sub(REDACTED, result)
-
-    return result
+    try:
+        guard = _get_guard()
+        guard.validate(text)
+        logger.debug("Agent response passed prompt injection check")
+        return text
+    except Exception as e:
+        logger.warning(f"Agent response blocked by guardrails: {str(e)[:100]}")
+        return CONTENT_BLOCKED
 
 
 def filter_input(text: str) -> str:
-    """Filter text FROM host TO agent.
+    """Filter text FROM host TO agent using LLM-based injection detection.
 
-    - Blocks entire message if ANY sensitive pattern matches
-    - Host should never be sending secrets; full block is the safe default
+    Uses guardrails-ai PromptInjection validator to prevent host questions
+    from containing injection attempts.
 
     Args:
         text: Host's question text to be sent to the agent
 
     Returns:
-        Original text if clean, or [CONTENT_BLOCKED] sentinel if any pattern matches
+        Original text if safe, or [CONTENT_BLOCKED] sentinel if injection detected
     """
-    text = sanitize_raw(text)
-    for pattern in _INPUT_BLOCK_PATTERNS:
-        if pattern.search(text):
-            return CONTENT_BLOCKED
+    if not text:
+        return ""
 
-    return text
+    try:
+        guard = _get_guard()
+        guard.validate(text)
+        logger.debug("Host question passed prompt injection check")
+        return text
+    except Exception as e:
+        logger.warning(f"Host question blocked by guardrails: {str(e)[:100]}")
+        return CONTENT_BLOCKED
