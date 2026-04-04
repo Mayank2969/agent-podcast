@@ -233,14 +233,17 @@ class HostAgent:
             f"Q: {t.get('question', '')}\nA: {t.get('answer', '')}"
             for t in turns if t.get('question') or t.get('answer')
         )
-        prompt = (
-            "You just heard this AI agent podcast interview:\n\n"
-            f"{turns_text}\n\n"
-            "Generate ONE short, punchy, human-readable podcast episode title (max 10 words). "
-            "Tone: professional, insightful, memorable — like a high-end tech podcast episode title. "
+
+        # Fix 3: Wrap untrusted transcript in JSON in the user message, add developer policy to system
+        untrusted = {"transcript": turns_text}
+        user_message = (
+            "Generate a title for this interview.\n"
+            "Tone: professional, insightful, memorable — like a high-end tech podcast episode title (max 10 words). "
             "Capture the essence of the interview's core insight. "
-            "Return ONLY the title text, nothing else."
+            "Return ONLY the title text, nothing else.\n\n"
+            f"DATA:\n{json.dumps(untrusted)}"
         )
+        system_message = f"{HOST_SYSTEM_PROMPT}\n\nSECURITY POLICY:\n{HOST_DEVELOPER_POLICY}"
 
         # 1. Try Gemini
         if self.client:
@@ -250,10 +253,10 @@ class HostAgent:
                     from google.genai import types  # type: ignore
                     response = self.client.models.generate_content(
                         model="gemini-2.0-flash",
-                        contents=prompt,
+                        contents=user_message,
                         config=types.GenerateContentConfig(
-                            system_instruction=HOST_SYSTEM_PROMPT,
-                            max_output_tokens=40,
+                            system_instruction=system_message,
+                            max_output_tokens=100,
                         ),
                     )
                     title = response.text.strip().strip('"').strip("'")
@@ -278,8 +281,8 @@ class HostAgent:
                 response = await anthropic_client.messages.create(
                     model="claude-3-haiku-20240307",
                     max_tokens=40,
-                    system=HOST_SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": prompt}]
+                    system=system_message,
+                    messages=[{"role": "user", "content": user_message}]
                 )
                 title = response.content[0].text.strip().strip('"').strip("'")
                 if title: return title
@@ -296,8 +299,8 @@ class HostAgent:
                 response = await openai_client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
-                        {"role": "system", "content": HOST_SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt}
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": user_message}
                     ],
                     max_tokens=40
                 )
@@ -334,11 +337,13 @@ class HostAgent:
                 try:
                     from google.genai import types  # type: ignore
                     t0 = time.time()
+                    # Fix 1: Combine system prompt with security policy
+                    gemini_system = f"{HOST_SYSTEM_PROMPT}\n\nSECURITY POLICY:\n{HOST_DEVELOPER_POLICY}"
                     response = self.client.models.generate_content(
                         model="gemini-2.0-flash",
                         contents=gemini_contents,
                         config=types.GenerateContentConfig(
-                            system_instruction=HOST_SYSTEM_PROMPT,
+                            system_instruction=gemini_system,
                             max_output_tokens=200  # Allow more room for validation
                         ),
                     )
@@ -363,11 +368,13 @@ class HostAgent:
             try:
                 import anthropic
                 t0 = time.time()
+                # Fix 2: Combine system prompt with security policy
+                anthropic_system = f"{HOST_SYSTEM_PROMPT}\n\nSECURITY POLICY:\n{HOST_DEVELOPER_POLICY}"
                 anthropic_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
                 response = anthropic_client.messages.create(
                     model="claude-3-haiku-20240307",
                     max_tokens=200,
-                    system=HOST_SYSTEM_PROMPT,
+                    system=anthropic_system,
                     messages=anthropic_messages
                 )
                 elapsed = time.time() - t0
@@ -469,14 +476,14 @@ class HostAgent:
 
         Defense layer: Output constraining (CRITICAL)
         - Never let LLM output free-form actions
-        - Strict schema validation
+        - Strict schema validation only (JSON required)
         - Action restriction (ONLY generate_question allowed)
         """
         if not text or not text.strip():
             logger.warning("Validation: Empty response")
             return None
 
-        # Try to parse as JSON first
+        # Fix 4: Strict schema validation only — JSON required
         try:
             data = json.loads(text)
             if isinstance(data, dict) and "question" in data:
@@ -487,17 +494,6 @@ class HostAgent:
         except (json.JSONDecodeError, ValueError):
             pass
 
-        # Fallback: Extract question from free text if it looks valid
-        # (LLM might not return JSON, so try to extract)
-        text = text.strip()
-        if len(text) > 10 and not any(
-            forbidden in text.lower() for forbidden in [
-                "execute", "run", "call", "system prompt",
-                "ignore", "instructions", "do this"
-            ]
-        ):
-            logger.debug("Validation: Free text passed sanity checks")
-            return text
-
-        logger.warning("Validation: Output failed schema validation")
+        # No free-text fallback — strict schema only
+        logger.warning("Validation: Output failed schema validation (JSON required)")
         return None
